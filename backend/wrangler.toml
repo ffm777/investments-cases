@@ -1,0 +1,11 @@
+name = "investments-progress"
+main = "worker.mjs"
+compatibility_date = "2026-10-14"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "investments-progress"
+database_id = "7f42dec1-00e6-43cd-8d86-2ee2786a09e0"
+
+[triggers]
+crons = ["0 3 * * *"]

@@ -15,19 +15,22 @@ main{max-width:1060px;margin:auto;padding:52px 24px 30px}.eyebrow{font-size:13px
 .note{font-size:15px;background:var(--light);border-left:3px solid var(--green);padding:15px 18px;margin:28px 0}footer{font-size:13px;color:var(--muted);padding:10px 0 20px}
 @media(max-width:700px){main{padding:32px 16px}.case{grid-template-columns:1fr;gap:12px;padding:22px}.action{flex-direction:row;align-items:center;justify-content:space-between;text-align:left}.chapter{padding:0}header{font-size:12px}}@media(max-width:440px){header{flex-direction:column;gap:3px}}
 </style>
+<link rel="stylesheet" href="shared/instructor-progress.css">
 </head>
 <body>
 <header><strong>INVESTMENTS / LAB</strong><span>Wiesbaden Business School</span></header>
 <main>
 <p class="eyebrow">Instructor overview</p><h1>Guided case studies</h1>
-<p class="lead">Choose a case for your lecture. Each case has its own address for sharing with students.</p>
-<nav class="cases" aria-label="Case studies by chapter">
+<p class="lead">Start a class session and follow completion at each checkpoint. Use Preview case to prepare without adding to the participation count.</p>
+<section id="instructorLogin"><form><div><label for="instructorKey">Instructor access key</label><input id="instructorKey" type="password" autocomplete="current-password" required></div><button type="submit">Show live progress</button></form></section><p id="liveConnection" role="status"></p><button type="button" id="signOut" hidden>Sign out</button><nav class="cases" aria-label="Case studies by chapter">
 <a class="case" href="chapter2/" aria-label="Open Chapter 2: One business. Four payment offers."><span class="chapter">Chapter 2</span><div><h2>One business. Four payment offers.</h2><p class="description">Compare payment offers using present values, annuities and growing cash flows.</p><span class="url">ffm777.github.io/investments-cases/chapter2/</span></div><div class="action"><span class="duration">25–35 minutes</span><span class="open">Open case →</span></div></a>
 <a class="case" href="chapter3/" aria-label="Open Chapter 3: Funding an expansion"><span class="chapter">Chapter 3</span><div><h2>Funding an expansion</h2><p class="description">Convert interest quotations, interpret the yield curve and match funding to payment dates.</p><span class="url">ffm777.github.io/investments-cases/chapter3/</span></div><div class="action"><span class="duration">20–25 minutes</span><span class="open">Open case →</span></div></a>
 <a class="case" href="chapter4/" aria-label="Open Chapter 4: Valuing Allianz"><span class="chapter">Chapter 4</span><div><h2>Valuing Allianz</h2><p class="description">Value dividends, test assumptions and build a two-stage growth model. Includes an optional bond extension.</p><span class="url">ffm777.github.io/investments-cases/chapter4/</span></div><div class="action"><span class="duration">30–40 minutes</span><span class="open">Open case →</span></div></a>
 </nav>
-<p class="note">For class, share the direct case address or its QR code. Students can start without an account; their answers remain in their own browser.</p>
+<p class="note">For class, share the direct case address or its QR code. Participants join the active session automatically. Reloading the same browser counts once per session. Passed gates stay counted; written reasoning still needs discussion. Counts describe browsers or groups.</p>
 <footer>Instructor navigation · Publicly accessible overview</footer>
 </main>
+<script src="shared/live-config.js"></script><script src="shared/instructor-progress.js"></script>
 </body>
 </html>
+
