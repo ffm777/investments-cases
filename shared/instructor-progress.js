@@ -1,7 +1,7 @@
 (() => {
 'use strict';
 const endpoint=(window.INVESTMENTS_LIVE_CONFIG?.endpoint||'').replace(/\/$/,'');
-const labels={chapter2:['Cash-flow timeline','Value offer B','Growth & delayed payments','Recommendation'],chapter3:['Interest quotations','Yield curve','Funding','Challenge the shortcut'],chapter4:['Dividend valuation','Sensitivity','Implied growth','Two-stage model']};
+const labels={chapter2:['Cash-flow timeline','Value offer B','Growth & delayed payments','Recommendation'],chapter3:['Interest quotations','Yield curve','Funding','Challenge the shortcut'],chapter4:['Dividend valuation','Sensitivity','Implied growth','Two-stage model'],chapter5:['Revenue model','Free cash flows','Investment decision','Sensitivity']};
 const panels=new Map();let token='',timer,busy=false;
 try{token=sessionStorage.getItem('investments-instructor-key')||'';}catch{}
 const connection=document.getElementById('liveConnection'),login=document.getElementById('instructorLogin'),signOut=document.getElementById('signOut');

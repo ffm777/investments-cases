@@ -19,3 +19,7 @@ Daily cleanup at 03:00 UTC removes sessions older than 30 days and their partici
 `worker.mjs` is the deployed Worker source, `schema.sql` is the database schema, and `wrangler.toml` records the production binding and cleanup schedule. The Worker is deployed separately from GitHub Pages. Editing backend source on GitHub alone does not update Cloudflare. Keep the existing ADMIN_TOKEN secret when redeploying. Frontend changes on main publish through GitHub Pages.
 
 Validation covered authorization, input validation, duplicate-event handling, gate percentages, completion of all four gates, closed sessions, fresh sessions, and cascading retention cleanup. A production smoke test used only synthetic participants and was ended afterwards.
+
+## Chapter 5 database upgrade
+
+Run `migration-chapter5.sql` once before deploying the current Worker, when no teaching session is active. It copies the original tables into the extensible `class_runs` and `class_participants` tables without deleting any original records. Check the returned counts before switching the Worker. Legacy tables are no longer read or written by the application; the same daily retention task clears their expired records too. The migration is idempotent for already-copied records and is not a live synchronization process. A fresh installation uses `schema.sql`.

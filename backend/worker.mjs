@@ -1,4 +1,4 @@
-const cases = new Set(['chapter2','chapter3','chapter4']);
+const cases = new Set(['chapter2','chapter3','chapter4','chapter5']);
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const validToken = /^[a-f0-9]{64}$/;
 const now = () => Date.now();
@@ -22,9 +22,9 @@ async function route(request, env) {
   const url=new URL(request.url), path=url.pathname, method=request.method;
   if (!env.DB || !env.ADMIN_TOKEN) failure(503,'Live progress is not configured.');
   if(path.startsWith('/api/admin/') && !await authorised(request,env)) failure(401,'Instructor sign-in required.');
-  let m=path.match(/^\/api\/cases\/(chapter[234])\/active$/);
+  let m=path.match(/^\/api\/cases\/(chapter[2345])\/active$/);
   if(method==='GET'&&m){
-    const run=await env.DB.prepare('SELECT id,case_id,label,expires_at FROM runs WHERE case_id=? AND closed_at IS NULL AND expires_at>?').bind(m[1],now()).first();
+    const run=await env.DB.prepare('SELECT id,case_id,label,expires_at FROM class_runs WHERE case_id=? AND closed_at IS NULL AND expires_at>?').bind(m[1],now()).first();
     return {run:run||null};
   }
   if(method==='POST'&&path==='/api/events'){
@@ -32,8 +32,8 @@ async function route(request, env) {
     if(!uuid.test(b.run||'')||!validToken.test(b.token||'')||!Number.isInteger(b.gate)||b.gate<0||b.gate>4)failure(400,'Invalid progress event.');
     const tokenHash=await hash(b.token), mask=b.gate===0?0:1<<(b.gate-1), time=now();
     const result=await env.DB.batch([
-      env.DB.prepare('INSERT INTO participants(run_id,token_hash,gates) SELECT id,?,? FROM runs WHERE id=? AND closed_at IS NULL AND expires_at>? ON CONFLICT(run_id,token_hash) DO UPDATE SET gates=participants.gates | excluded.gates WHERE (participants.gates | excluded.gates) != participants.gates').bind(tokenHash,mask,b.run,time),
-      env.DB.prepare('SELECT id FROM runs WHERE id=? AND closed_at IS NULL AND expires_at>?').bind(b.run,time)
+      env.DB.prepare('INSERT INTO class_participants(run_id,token_hash,gates) SELECT id,?,? FROM class_runs WHERE id=? AND closed_at IS NULL AND expires_at>? ON CONFLICT(run_id,token_hash) DO UPDATE SET gates=class_participants.gates | excluded.gates WHERE (class_participants.gates | excluded.gates) != class_participants.gates').bind(tokenHash,mask,b.run,time),
+      env.DB.prepare('SELECT id FROM class_runs WHERE id=? AND closed_at IS NULL AND expires_at>?').bind(b.run,time)
     ]);
     if(!result[1].results.length)failure(409,'This teaching session has ended.');
     return {accepted:true};
@@ -46,26 +46,26 @@ async function route(request, env) {
       COALESCE(SUM((p.gates & 4) != 0),0) AS gate3,
       COALESCE(SUM((p.gates & 8) != 0),0) AS gate4,
       COALESCE(SUM(p.gates=15),0) AS finished
-      FROM runs r LEFT JOIN participants p ON p.run_id=r.id
-      WHERE r.id=(SELECT id FROM runs r2 WHERE r2.case_id=r.case_id ORDER BY created_at DESC,id DESC LIMIT 1)
+      FROM class_runs r LEFT JOIN class_participants p ON p.run_id=r.id
+      WHERE r.id=(SELECT id FROM class_runs r2 WHERE r2.case_id=r.case_id ORDER BY created_at DESC,id DESC LIMIT 1)
       GROUP BY r.id`).all();
     return {asOf:now(),runs:rows.results};
   }
   if(method==='POST'&&path==='/api/admin/runs'){
     const b=await body(request);if(!cases.has(b.case)||!uuid.test(b.id||'')||typeof b.label!=='string'||b.label.trim().length<1||b.label.length>80)failure(400,'Choose a case and a short session label.');
     const time=now();
-    const existing=await env.DB.prepare('SELECT * FROM runs WHERE id=?').bind(b.id).first();
+    const existing=await env.DB.prepare('SELECT * FROM class_runs WHERE id=?').bind(b.id).first();
     if(existing){if(existing.case_id!==b.case)failure(409,'Session ID already in use.');return {run:existing};}
     try {
       await env.DB.batch([
-        env.DB.prepare('UPDATE runs SET closed_at=expires_at WHERE case_id=? AND closed_at IS NULL AND expires_at<=?').bind(b.case,time),
-        env.DB.prepare('INSERT INTO runs(id,case_id,label,created_at,expires_at) VALUES (?,?,?,?,?)').bind(b.id,b.case,b.label.trim(),time,time+12*3600000)
+        env.DB.prepare('UPDATE class_runs SET closed_at=expires_at WHERE case_id=? AND closed_at IS NULL AND expires_at<=?').bind(b.case,time),
+        env.DB.prepare('INSERT INTO class_runs(id,case_id,label,created_at,expires_at) VALUES (?,?,?,?,?)').bind(b.id,b.case,b.label.trim(),time,time+12*3600000)
       ]);
     } catch { failure(409,'An active session already exists. Refresh the overview before starting another.'); }
-    return {run:await env.DB.prepare('SELECT * FROM runs WHERE id=?').bind(b.id).first()};
+    return {run:await env.DB.prepare('SELECT * FROM class_runs WHERE id=?').bind(b.id).first()};
   }
   m=path.match(/^\/api\/admin\/runs\/([0-9a-f-]+)\/close$/i);
-  if(method==='POST'&&m){if(!uuid.test(m[1]))failure(400,'Invalid session.');await env.DB.prepare('UPDATE runs SET closed_at=COALESCE(closed_at,?) WHERE id=?').bind(now(),m[1]).run();return {closed:true};}
+  if(method==='POST'&&m){if(!uuid.test(m[1]))failure(400,'Invalid session.');await env.DB.prepare('UPDATE class_runs SET closed_at=COALESCE(closed_at,?) WHERE id=?').bind(now(),m[1]).run();return {closed:true};}
   failure(404,'Not found.');
 }
 export default {
@@ -78,5 +78,5 @@ export default {
     try{return new Response(JSON.stringify(await route(request,env)),{headers});}
     catch(e){return new Response(JSON.stringify({error:e.status?e.message:'Live progress is temporarily unavailable.'}),{status:e.status||503,headers});}
   },
-  async scheduled(_event,env){await env.DB.prepare('DELETE FROM runs WHERE created_at<?').bind(now()-30*86400000).run();}
+  async scheduled(_event,env){const cutoff=now()-30*86400000;await env.DB.batch([env.DB.prepare('DELETE FROM class_runs WHERE created_at<?').bind(cutoff),env.DB.prepare('DELETE FROM runs WHERE created_at<?').bind(cutoff)]);}
 };
