@@ -7,14 +7,17 @@ let slides=[],position=0,revealed=[],full=false,busy=false,payload;
 function storedKey(){try{return sessionStorage.getItem(STORAGE_KEY)||'';}catch{return '';}}
 function saveKey(value){try{value?sessionStorage.setItem(STORAGE_KEY,value):sessionStorage.removeItem(STORAGE_KEY);}catch{}}
 function bytes(s){return Uint8Array.from(atob(s),c=>c.charCodeAt(0));}
+async function unseal(p,password,context){
+ if(p.version!==1||p.context!==context||p.iterations!==600000)throw new Error('The solution format is not supported. Reload the page.');
+ const material=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveKey']);
+ const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt:bytes(p.salt),iterations:p.iterations,hash:'SHA-256'},material,{name:'AES-GCM',length:256},false,['decrypt']);
+ try{return await crypto.subtle.decrypt({name:'AES-GCM',iv:bytes(p.iv),additionalData:new TextEncoder().encode(context),tagLength:128},key,bytes(p.ciphertext));}
+ catch{throw new Error('Access key not accepted. Use your instructor access key.');}
+}
 async function decrypt(password){
  if(!crypto.subtle)throw new Error('Use the HTTPS address in a current browser to unlock this page.');
  if(!payload){const response=await fetch('solution.enc.json',{cache:'no-store',referrerPolicy:'no-referrer'});if(!response.ok)throw new Error('The solution could not be loaded. Please try again.');payload=await response.json();}
- if(payload.version!==1||payload.context!==CONTEXT||payload.iterations!==600000)throw new Error('The solution format is not supported. Reload the page.');
- const material=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveKey']);
- const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt:bytes(payload.salt),iterations:payload.iterations,hash:'SHA-256'},material,{name:'AES-GCM',length:256},false,['decrypt']);
- try{const result=await crypto.subtle.decrypt({name:'AES-GCM',iv:bytes(payload.iv),additionalData:new TextEncoder().encode(CONTEXT),tagLength:128},key,bytes(payload.ciphertext));return new TextDecoder().decode(result);}
- catch{throw new Error('Access key not accepted. Use your instructor access key.');}
+ return new TextDecoder().decode(await unseal(payload,password,CONTEXT));
 }
 function maxSteps(slide){return Math.max(0,...[...slide.querySelectorAll('[data-reveal]')].map(el=>Number(el.dataset.reveal)));}
 function render(){
@@ -36,6 +39,15 @@ function render(){
 function focusTitle(){const title=slides[position].querySelector('h2');title.tabIndex=-1;title.focus({preventScroll:true});}
 function go(index){position=Math.max(0,Math.min(slides.length-1,index));render();focusTitle();window.scrollTo({top:0,behavior:'instant'});}
 function next(){if(!slides.length||full)return;if(revealed[position]<maxSteps(slides[position])){revealed[position]++;render();}else if(position<slides.length-1)go(position+1);}
+let lastReset='';
+function resetAll(stamp){
+ if(!stamp||stamp===lastReset)return;lastReset=stamp;
+ if(!slides.length)return;
+ position=0;revealed=slides.map(()=>0);full=false;render();window.scrollTo({top:0,behavior:'instant'});
+ if(document.visibilityState==='visible')focusTitle();
+}
+window.addEventListener('storage',event=>{if(event.key==='investments-solution-reset:'+chapter)resetAll(event.newValue);});
+try{const channel=new BroadcastChannel('investments-instructor-solutions');channel.onmessage=event=>{if(event.data?.type==='reset'&&event.data.caseId===chapter)resetAll(event.data.stamp);};}catch{}
 function mount(html){
  // Only authenticated, locally decrypted course content is inserted here.
  $('content').innerHTML=html;slides=[...$('content').querySelectorAll('.slide')];
@@ -61,6 +73,19 @@ $('restart').addEventListener('click',()=>{revealed[position]=0;render();});
 $('viewSelect').addEventListener('change',()=>go(Number($('viewSelect').value)));
 $('handout').addEventListener('click',()=>{full=!full;render();window.scrollTo({top:0,behavior:'instant'});});
 $('print').addEventListener('click',()=>window.print());$('lock').addEventListener('click',lock);
+$('downloadWorkbook')?.addEventListener('click',async()=>{
+ const button=$('downloadWorkbook'),status=$('downloadStatus');let password=storedKey();
+ if(button.disabled||!password||$('solution').hidden)return;
+ button.disabled=true;button.textContent='Preparing Excel…';status.textContent='';
+ try{
+  const response=await fetch('workbook.enc.json',{cache:'no-store',referrerPolicy:'no-referrer'});if(!response.ok)throw new Error('Workbook could not be loaded. Please try again.');
+  const data=await unseal(await response.json(),password,'investments-'+chapter+'-instructor-workbook-v1');
+  if($('solution').hidden||storedKey()!==password)return;
+  const url=URL.createObjectURL(new Blob([data],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+  const a=document.createElement('a');a.href=url;a.download='Green_Wheels_Instructor_Solution.xlsx';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);status.textContent='Excel solution downloaded.';
+ }catch(error){status.textContent=error.message;button.textContent='Retry Excel download';}
+ finally{password='';button.disabled=false;if(button.textContent==='Preparing Excel…')button.textContent='Download Excel solution';}
+});
 $('fullscreen').addEventListener('click',async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{$('stepStatus').textContent='Use your browser’s full-screen command to maximise this view.';}});
 document.addEventListener('keydown',event=>{
  if(!$('locked').hidden||full||event.altKey||event.ctrlKey||event.metaKey||event.shiftKey||['INPUT','SELECT','TEXTAREA','A'].includes(event.target.tagName))return;
