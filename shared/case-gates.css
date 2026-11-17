@@ -1,0 +1,5 @@
+section[data-case-gate][hidden],section[data-case-extra][hidden],.case-gate-next[hidden],.case-resume[hidden]{display:none!important}
+nav a.case-step-locked{opacity:.5;cursor:default;background:#F6F5FA}
+.case-gate-next{margin:16px 0 20px}.case-gate-next a{display:inline-block;padding:10px 15px;border:1px solid #BDB5E3;border-radius:8px;background:#EEEBF8;color:#362047;text-decoration:none;font-size:15px}.case-gate-next a:focus-visible,.case-resume button:focus-visible{outline:3px solid #7A6B9E;outline-offset:3px}
+.case-resume{font-size:14px;color:#6E6878;margin:20px 0}.case-resume button{font:inherit;color:#5B4C9E;border:0;border-bottom:1px dotted #BDB5E3;border-radius:0;background:transparent;padding:2px 0;cursor:pointer}
+@media print{.case-gate-next,.case-resume{display:none!important}}
