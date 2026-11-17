@@ -7,14 +7,36 @@ try{token=sessionStorage.getItem('investments-instructor-key')||'';}catch{}
 const connection=document.getElementById('liveConnection'),login=document.getElementById('instructorLogin'),signOut=document.getElementById('signOut');
 const date=new Intl.DateTimeFormat('en-GB',{dateStyle:'medium'}).format(new Date());
 for(const [caseId,gateLabels] of Object.entries(labels)){
- const link=document.querySelector('a.case[href="'+caseId+'/"]'),wrap=document.createElement('div');wrap.className='case-wrap';link.replaceWith(wrap);wrap.append(link);link.href=caseId+'/?preview=1';link.querySelector('.open').textContent='Preview case →';
+ const link=document.querySelector('a.case[href="'+caseId+'/"]'),wrap=document.createElement('div');wrap.className='case-wrap';wrap.id='case-panel-'+caseId;wrap.setAttribute('role','tabpanel');wrap.setAttribute('aria-labelledby','case-tab-'+caseId);wrap.tabIndex=0;link.replaceWith(wrap);wrap.append(link);link.href=caseId+'/?preview=1';link.querySelector('.open').textContent='Preview case →';
  const panel=document.createElement('section');panel.className='live-panel';panel.hidden=true;panel.setAttribute('aria-label',caseId+' live progress');
  panel.innerHTML='<div class="live-top"><h3>Class progress</h3><span class="live-count"></span></div><p class="session-note"></p><div class="gates">'+gateLabels.map((name,i)=>'<div class="gate"><label>'+String(i+1).padStart(2,'0')+' · '+name+'</label><strong>—</strong><progress max="100" value="0" aria-label="'+name+' completion"></progress><small>Not started</small></div>').join('')+'</div><p class="done-line"></p><div class="session-controls"><label>Session label <input maxlength="80" aria-label="Session label for '+caseId+'"></label><button type="button" class="start-session">Start session</button><button type="button" class="close-session" hidden>End session</button></div><p class="live-message" role="status"></p>';
  if(link.dataset.solution){const access=document.createElement('div');access.className='solution-access';const solution=document.createElement('a');solution.href=link.dataset.solution;solution.textContent='Instructor solution →';const reset=document.createElement('button');reset.type='button';reset.className='reset-solution';reset.textContent='Reset solution';reset.setAttribute('aria-label','Reset all instructor solution steps for '+caseId);reset.title='Hide all revealed steps for this case in this browser';const note=document.createElement('span');note.textContent=(link.dataset.solutionViews||'6')+' discussion views · Encrypted · Same instructor access key';const status=document.createElement('p');status.className='solution-reset-status';status.setAttribute('role','status');reset.addEventListener('click',()=>resetSolution(caseId,status));access.append(solution,reset,note,status);wrap.append(access);}
  wrap.append(panel);panel.querySelector('input').value=date;
- const entry={panel,run:null};panels.set(caseId,entry);
+ const entry={panel,wrap,run:null};panels.set(caseId,entry);
  panel.querySelector('.start-session').addEventListener('click',()=>start(caseId));panel.querySelector('.close-session').addEventListener('click',()=>close(caseId));
 }
+const caseTabs=[...document.querySelectorAll('.case-tab')];
+const selectionKey='investments-instructor-active-case';
+function selectCase(caseId,focus=false){
+ if(!panels.has(caseId))return;
+ for(const tab of caseTabs){const active=tab.dataset.case===caseId;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;if(active&&focus)tab.focus();}
+ for(const [id,{wrap}]of panels)wrap.hidden=id!==caseId;
+ try{sessionStorage.setItem(selectionKey,caseId);}catch{}
+}
+for(const [index,tab]of caseTabs.entries()){
+ tab.addEventListener('click',()=>selectCase(tab.dataset.case));
+ tab.addEventListener('keydown',event=>{
+  const n=caseTabs.length;let next;
+  if(event.key==='ArrowRight')next=(index+1)%n;
+  else if(event.key==='ArrowLeft')next=(index+n-1)%n;
+  else if(event.key==='Home')next=0;
+  else if(event.key==='End')next=n-1;
+  else return;
+  event.preventDefault();selectCase(caseTabs[next].dataset.case,true);
+ });
+}
+let savedCase;try{savedCase=sessionStorage.getItem(selectionKey);}catch{}
+selectCase(panels.has(savedCase)?savedCase:'chapter2');
 function resetSolution(caseId,status){
  const stamp=Date.now()+':'+crypto.randomUUID();let delivered=false;
  try{localStorage.setItem('investments-solution-reset:'+caseId,stamp);delivered=true;}catch{}
