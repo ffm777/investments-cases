@@ -1,0 +1,4 @@
+.number-format{display:flex;align-items:baseline;flex-wrap:wrap;gap:3px 8px;margin-top:4px;color:#6E6878;font-size:12px;line-height:1.4;white-space:normal}.number-format:empty{display:none}.number-format button{font:inherit;color:#5B4C9E;border:0;border-bottom:1px dotted #BDB5E3;background:transparent;border-radius:0;padding:1px 0;cursor:pointer;text-align:left;white-space:normal}.number-format button:focus-visible{outline:2px solid #7A6B9E;outline-offset:3px}@media print{.number-format button{display:none}}
+.number-format button{display:none}
+input:focus + .number-format button,input[aria-invalid=true] + .number-format button,.number-format:focus-within button{display:inline}
+@media print{.number-format button{display:none!important}}
