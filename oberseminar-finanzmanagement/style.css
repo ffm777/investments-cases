@@ -34,11 +34,15 @@ h1,h2,h3,h4 { color: var(--aubergine); line-height: 1.14; }
 .mast-inner { display: flex; justify-content: space-between; align-items: center; min-height: 78px; gap: 1.2rem; }
 .identity { display: inline-flex; align-items: center; gap: .74rem; text-decoration: none; color: var(--aubergine); font-size: 1.12rem; letter-spacing: -.025em; line-height: 1.1; }
 .identity strong { font-weight: 700; }
-.book-sign { display: inline-flex; align-items: flex-end; justify-content: center; gap: 3px; width: 37px; height: 37px; padding: 8px; background: var(--aubergine); border-radius: 5px; }
-.book-sign i { width: 4px; background: var(--pale); }
-.book-sign i:nth-child(1) { height: 43%; }
-.book-sign i:nth-child(2) { height: 71%; }
-.book-sign i:nth-child(3) { height: 100%; }
+.hsrm-logo {
+  flex: none;
+  width: 84px;
+  aspect-ratio: 129 / 33;
+  background-color: var(--aubergine);
+  /* Fit the visible mark within the transparent margins of the supplied image. */
+  -webkit-mask: url("./assets/hsrm.png") 62.16% 37.14% / 128.68% auto no-repeat;
+  mask: url("./assets/hsrm.png") 62.16% 37.14% / 128.68% auto no-repeat;
+}
 .top-nav { display: flex; align-self: stretch; gap: 1.8rem; }
 .top-nav a { position: relative; display: grid; align-content: center; color: var(--muted); font-size: .94rem; font-weight: 600; text-decoration: none; }
 .top-nav a:hover { color: var(--aubergine); }
@@ -196,7 +200,7 @@ footer { border-top: 1px solid var(--line); margin-top: 1.6rem; }
 @media (max-width: 560px) {
   .identity { font-size:.98rem; }
   .identity strong { display:block; }
-  .book-sign { width:32px; height:32px; padding:6px; }
+  .hsrm-logo { width:60px; }
   .hero { grid-template-columns:1fr; }
   .hero-copy { padding:1.6rem 1.45rem 1.7rem; }
   .hero h1 { font-size:2.8rem; }
