@@ -210,21 +210,28 @@ export const steps = [
   }
 ];
 
-export const conclusion = {
-  title: 'Was bedeutet das Angebot für die Eigentümer?',
-  paragraphs: [
-    'Das Angebot von ' + euro(assumptions.offerPerShare) + ' je Aktie liegt ' + de(premium) + ' % über dem DCF-Wert von ' + euro(dcfPerShare) + '. Auch die Peer-Mediane von ' + euro(kgvPrices[1]) + ' (KGV) und ' + euro(evPrices[1]) + ' (EV/EBITDA) liegen darunter. Gemessen an den Basiswerten ist der Preis für die Verkäufer attraktiv. Beide Peer-Bandbreiten lassen auch höhere Werte zu.',
-    'Rund ' + de(terminalShare, 1) + ' % des operativen Unternehmenswerts stammen aus den Jahren nach 2029. Wächst der Free Cash Flow ab 2030 nur um ' + percent(lowerGrowth) + ' statt um ' + percent(assumptions.perpetualGrowth) + ', sinkt der DCF-Wert bei gleichem WACC auf ' + euro(lowerGrowthPerShare) + ' je Aktie.'
-  ],
-  comparisons: [
-    { label: 'DCF', value: dcfPerShare },
-    { label: 'KGV', value: kgvPrices[1], low: kgvPrices[0], high: kgvPrices[2] },
-    { label: 'EV/EBITDA', value: evPrices[1], low: evPrices[0], high: evPrices[2] },
-    { label: 'Kaufangebot', value: assumptions.offerPerShare }
-  ],
-  discussion: [
-    'Welche Nachweise würden Sie vom Vertrieb und von der Produktion anfordern, um das langfristige Wachstum und den dafür nötigen Investitionsbedarf zu beurteilen?',
-    'Ein Vergleichsunternehmen muss seine Fertigung aufwendiger erneuern als Mainwerk. Wie beeinflusst das die Aussagekraft von EV/EBITDA?',
-    'Würden Sie den Eigentümern empfehlen, das Angebot anzunehmen oder weiterzuverhandeln? Begründen Sie Ihre Position mit dem DCF-Wert, der Peer-Bandbreite und einer Annahme, die Sie noch prüfen möchten.'
-  ]
-};
+export function summarizeValuation({
+  dcf = dcfPerShare, kgv = kgvPrices[1], evEbitda = evPrices[1],
+  offerPremium = premium, terminalWeight = terminalShare
+} = {}) {
+  return {
+    title: 'Was bedeutet das Angebot für die Eigentümer?',
+    paragraphs: [
+      'Das Angebot von ' + euro(assumptions.offerPerShare) + ' je Aktie liegt ' + de(offerPremium) + ' % über dem DCF-Wert von ' + euro(dcf) + '. Auch die Peer-Mediane von ' + euro(kgv) + ' (KGV) und ' + euro(evEbitda) + ' (EV/EBITDA) liegen darunter. Gemessen an den Basiswerten ist der Preis für die Verkäufer attraktiv. Beide Peer-Bandbreiten lassen auch höhere Werte zu.',
+      'Rund ' + de(terminalWeight, 1) + ' % des operativen Unternehmenswerts stammen aus den Jahren nach 2029. In einer Vergleichsrechnung mit den Falldaten wächst der Free Cash Flow ab 2030 nur um ' + percent(lowerGrowth) + ' statt um ' + percent(assumptions.perpetualGrowth) + '. Bei gleichem WACC ergibt sich dann ein DCF-Wert von ' + euro(lowerGrowthPerShare) + ' je Aktie.'
+    ],
+    comparisons: [
+      { label: 'DCF', value: dcf },
+      { label: 'KGV', value: kgv, low: kgvPrices[0], high: kgvPrices[2] },
+      { label: 'EV/EBITDA', value: evEbitda, low: evPrices[0], high: evPrices[2] },
+      { label: 'Kaufangebot', value: assumptions.offerPerShare }
+    ],
+    discussion: [
+      'Welche Nachweise würden Sie vom Vertrieb und von der Produktion anfordern, um das langfristige Wachstum und den dafür nötigen Investitionsbedarf zu beurteilen?',
+      'Ein Vergleichsunternehmen muss seine Fertigung aufwendiger erneuern als Mainwerk. Wie beeinflusst das die Aussagekraft von EV/EBITDA?',
+      'Würden Sie den Eigentümern empfehlen, das Angebot anzunehmen oder weiterzuverhandeln? Begründen Sie Ihre Position mit dem DCF-Wert, der Peer-Bandbreite und einer Annahme, die Sie noch prüfen möchten.'
+    ]
+  };
+}
+
+export const conclusion = summarizeValuation();

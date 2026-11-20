@@ -227,3 +227,55 @@ footer { border-top: 1px solid var(--line); margin-top: 1.6rem; }
   .identity { flex-shrink:0; }
   .hero h1 { font-size:clamp(1.95rem,8.8vw,2.75rem); }
 }
+
+/* Fallbearbeitung: Falldaten und fortlaufendes Bewertungsblatt */
+.study-path { padding: 1.15rem 0 .85rem; border-bottom: 1px solid var(--line); }
+.path-meta { display:flex; justify-content:space-between; align-items:baseline; gap:1rem; color:var(--muted); font-size:.87rem; }
+.path-meta span:first-child { color:var(--aubergine); font-weight:700; }
+.study-path .step-list { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:.3rem; margin:.45rem 0 0; }
+.study-path .step-link { height:100%; line-height:1.2; font-size:.92rem; }
+.study-body { min-width:0; padding-block:clamp(1.3rem,2.8vw,2.5rem); }
+.study-body .eyebrow { margin-bottom:.4rem; }
+.study-body .intro { max-width:85ch; margin:.7rem 0 1.35rem; }
+.worksheet-layout { display:grid; grid-template-columns:minmax(0, .96fr) minmax(0, 1.9fr); align-items:start; gap:clamp(1.2rem, 2.8vw, 2.6rem); }
+.sheet-task, .case-facts, #workbook-host { min-width:0; }
+.sheet-task h2, .conclusion h2 { font-size:1.4rem; letter-spacing:-.025em; }
+.sheet-task .task-prompt { margin:.45rem 0 .85rem; }
+.case-facts { padding:.85rem 1rem; background:var(--card); border:1px solid var(--line); border-radius:6px; }
+.case-facts summary, .finished-sheet > summary { color:var(--aubergine); font-weight:700; cursor:pointer; }
+.current-facts > summary { font-size:1.18rem; }
+.case-facts .exhibit { margin:.75rem 0 .3rem; }
+.case-facts .exhibit + .exhibit { margin-top:1rem; }
+.case-facts .exhibit h3 { margin-bottom:.5rem; font-size:1.01rem; letter-spacing:0; }
+.case-facts .data-table { background:white; font-size:.87rem; }
+.case-facts .data-table :is(th,td) { padding:.42rem .4rem; }
+.case-facts .data-table thead th { font-size:.82rem; }
+.case-facts .table-note { font-size:.88rem; margin-top:.6rem; }
+.case-facts .older-exhibits, .previous-inputs { border-top:1px solid var(--line); padding-top:.75rem; margin-top:.8rem; }
+.prior-data { margin-top:.65rem; }
+.prior-data > summary { font-size:.92rem; color:var(--violet); }
+.previous-inputs p { margin:.45rem 0; font-size:.9rem; }
+.worksheet-tip { margin:.85rem 0; padding:.75rem 1rem; border-left:3px solid var(--violet); background:var(--pale); }
+.worksheet-tip h3 { font-size:1.02rem; }
+.worksheet-tip p { margin:.4rem 0 .15rem; }
+.feedback ul { margin:.4rem 0 0; padding-left:1.25rem; }
+.feedback li + li { margin-top:.25rem; }
+.study-body .conclusion { max-width:53rem; margin-inline:auto; }
+.finished-sheet { padding:.8rem 1rem; margin:1.2rem 0; border:1px solid var(--line); border-radius:5px; }
+.finished-sheet .table-note { margin:.45rem 0 .7rem; }
+@media (max-width: 1020px) {
+  .study-path .step-link { gap:.35rem; font-size:.84rem; }
+  .worksheet-layout { grid-template-columns:minmax(0,.9fr) minmax(0,1.6fr); gap:1rem; }
+  .case-facts { padding:.7rem; }
+}
+@media (max-width: 800px) {
+  .worksheet-layout { grid-template-columns:minmax(0,1fr); gap:1.15rem; }
+  .study-path .step-link { justify-content:center; }
+}
+@media (max-width: 740px) {
+  .study-path { padding:.65rem 0; }
+  .study-path .step-list { display:flex; justify-content:space-between; gap:.25rem; }
+  .study-path .step-link { min-width:2.35rem; min-height:2.35rem; }
+  .study-path [aria-current=step] .step-number { outline:2px solid var(--violet); outline-offset:2px; }
+  .finished-sheet { padding:.65rem .5rem; }
+}

@@ -1,363 +1,283 @@
-import { steps, conclusion } from './case.mjs';
+import { steps as legacySteps, summarizeValuation } from './case.mjs?v=arbeitsblatt';
+import { stages, validateStage } from './worksheet-case.mjs';
+import { mountWorkbook, sheetValues } from './workbook.mjs';
+import { calculate } from './formula.mjs';
 import { comparisonChart } from './chart.mjs';
 
-const workspace = document.getElementById('workspace');
-const overview = document.getElementById('overview');
-const storageKey = 'hsrm-mainwerk-fallstudie-2026-v1';
-const last = steps.length;
+const workspace = document.querySelector('#workspace');
+const overview = document.querySelector('#overview');
+const storageKey = 'hsrm-mainwerk-arbeitsblatt-v2';
+const last = stages.length;
+const rowsThrough = stages.map((_, i) => stages.slice(0, i + 1).flatMap(step => step.rows));
+const cellsByStage = new Map();
+stages.forEach((step, i) => step.rows.forEach(row => {
+  for (const column of row.editable) cellsByStage.set(column + row.row, i);
+}));
 let storageWorks = true;
 let current = null;
-let state = readState();
+let workbook = null;
+let renderGeneration = 0;
 
-function escapeHtml(value) {
-  return String(value).replace(/[&<>"']/g, char => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-  })[char]);
+function escapeHtml(text) {
+  return String(text ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
 }
-
-function numberFromInput(raw, unit) {
-  let value = String(raw ?? '').trim().replace(/−/g, '-');
-  if (unit === '%') value = value.replace(/\s*%$/, '');
-  if (unit === '€' || unit === 'Mio. €') value = value.replace(/\s*(?:Mio\.?\s*)?€$/i, '');
-  if (unit === '×') value = value.replace(/\s*[×x]$/i, '');
-  const groupedSpace = /^[+-]?\d{1,3}(?:[ \u00a0\u202f]\d{3})+(?:[.,]\d+)?$/;
-  if (groupedSpace.test(value)) value = value.replace(/[ \u00a0\u202f]/g, '');
-  if (/^[+-]?\d{1,3}(?:\.\d{3})+,\d+$/.test(value)) {
-    value = value.replace(/\./g, '');
-  } else if (/^[+-]?\d{1,3}(?:,\d{3})+\.\d+$/.test(value)) {
-    value = value.replace(/,/g, '');
+function load(key) {
+  try { return JSON.parse(localStorage.getItem(key)); }
+  catch (err) { if (!(err instanceof SyntaxError)) storageWorks = false; return null; }
+}
+function fresh() { return { raw:{}, choice:'', completed:0, opened:0 }; }
+function computeSheet(index, raw) {
+  const inputs = sheetValues(rowsThrough[index], raw);
+  return calculate(inputs, Object.keys(inputs));
+}
+function evaluate(index, state) {
+  return validateStage(index, state.raw, computeSheet(index, state.raw), state.choice);
+}
+function restore() {
+  const stored = load(storageKey);
+  const next = fresh();
+  if (!stored || typeof stored !== 'object') return next;
+  for (const [addr,value] of Object.entries(stored.raw || {})) {
+    if (cellsByStage.has(addr) && typeof value === 'string' && value) next.raw[addr] = value.slice(0,800);
   }
-  if (!/^[+-]?(?:\d+(?:[.,]\d+)?|[.,]\d+)$/.test(value)) return NaN;
-  return Number(value.replace(',', '.'));
+  if (typeof stored.choice === 'string') next.choice = stored.choice;
+  const completed = Number.isInteger(stored.completed) ? Math.min(stored.completed,last) : 0;
+  while (next.completed < completed && evaluate(next.completed,next).passed) next.completed++;
+  next.opened = Math.min(next.completed,last-1,Math.max(0,Number.isInteger(stored.opened)?stored.opened:0));
+  return next;
 }
-
-function fieldIsCorrect(field, draft) {
-  const result = numberFromInput(draft[field.id], field.unit);
-  return Number.isFinite(result) && Math.abs(result - field.expected) <= field.tolerance + 1e-9;
-}
-
-function choiceIsCorrect(step, draft) {
-  return !step.choice || draft.choice === String(step.choice.correctIndex);
-}
-
-function readState() {
-  let incoming;
-  try {
-    incoming = JSON.parse(localStorage.getItem(storageKey));
-  } catch (error) {
-    if (!(error instanceof SyntaxError)) storageWorks = false;
-  }
-  const drafts = {};
-  for (const step of steps) {
-    const stored = incoming?.drafts?.[step.id];
-    const draft = {};
-    for (const key of [...step.fields.map(field => field.id), 'choice']) {
-      if (typeof stored?.[key] === 'string') draft[key] = stored[key].slice(0, 80);
-    }
-    drafts[step.id] = draft;
-  }
-  let completed = 0;
-  const limit = Number.isInteger(incoming?.completed) ? Math.min(last, incoming.completed) : 0;
-  while (completed < limit) {
-    const step = steps[completed];
-    const draft = drafts[step.id];
-    if (!step.fields.every(field => fieldIsCorrect(field, draft)) || !choiceIsCorrect(step, draft)) break;
-    completed++;
-  }
-  return { drafts, completed };
-}
-
+let state = restore();
+const legacy = load('hsrm-mainwerk-fallstudie-2026-v1');
 function save() {
-  try {
-    localStorage.setItem(storageKey, JSON.stringify(state));
-    storageWorks = true;
-  } catch {
-    storageWorks = false;
+  try { localStorage.setItem(storageKey,JSON.stringify(state)); storageWorks=true; }
+  catch { storageWorks=false; }
+  const message = document.querySelector('#storage-warning');
+  if (message) message.hidden=storageWorks;
+}
+function labelStart() {
+  const hasEntries = Object.values(state.raw).some(Boolean) || state.choice !== '';
+  for (const label of document.querySelectorAll('[data-start-label]')) {
+    label.textContent = state.completed === last ? 'Ergebnisse ansehen' : state.completed || hasEntries ? 'Fallstudie fortsetzen' : 'Fallstudie starten';
   }
 }
-
-function updateStartLabels() {
-  const hasDraft = Object.values(state.drafts).some(draft => Object.values(draft).some(Boolean));
-  const label = state.completed === last ? 'Ergebnisse ansehen' : hasDraft ? 'Fallstudie fortsetzen' : null;
-  document.querySelectorAll('[data-start-label]').forEach(el => {
-    if (!el.dataset.initialLabel) el.dataset.initialLabel = el.textContent;
-    el.textContent = label || el.dataset.initialLabel;
+function progress() {
+  const items = stages.map((step,i) => {
+    const done = i < state.completed, locked = i > state.completed;
+    const status = done ? ', geprüft' : locked ? ', gesperrt' : '';
+    return '<li><button type="button" class="step-link'+(done?' is-complete':'')+'" data-step="'+i+'" aria-label="Schritt '+(i+1)+', '+escapeHtml(step.nav)+status+'" '+(i===current?'aria-current="step"':'')+' '+(locked?'disabled':'')+'><span class="step-number" aria-hidden="true">'+(done?'✓':i+1)+'</span><span class="step-name">'+escapeHtml(step.nav)+'</span></button></li>';
+  }).join('');
+  return '<nav class="study-path" aria-label="Bearbeitungsfortschritt"><div class="path-meta"><span>Ihr Bewertungsweg</span><span>'+state.completed+' von '+last+' Schritten geprüft</span></div><ol class="step-list">'+items+'</ol></nav>';
+}
+function exhibits(step) {
+  return step.exhibits.map(item=>{
+    const headings=item.headers.map(h=>'<th scope="col">'+escapeHtml(h)+'</th>').join('');
+    const body=item.rows.map(row=>'<tr><th scope="row">'+escapeHtml(row[0])+'</th>'+row.slice(1).map(v=>'<td>'+escapeHtml(v)+'</td>').join('')+'</tr>').join('');
+    return '<section class="exhibit"><h3>'+escapeHtml(item.title)+'</h3><div class="table-scroll" tabindex="0" role="region" aria-label="'+escapeHtml(item.title)+'"><table class="data-table"><thead><tr>'+headings+'</tr></thead><tbody>'+body+'</tbody></table></div>'+(item.note?'<p class="table-note">'+escapeHtml(item.note)+'</p>':'')+'</section>';
+  }).join('');
+}
+function archivedInputs(i) {
+  const step=legacySteps[i], draft=legacy?.drafts?.[step.id];
+  if (!draft || typeof draft!=='object') return '';
+  const rows=step.fields.filter(f=>typeof draft[f.id]==='string' && draft[f.id].trim()).map(f=>'<tr><th scope="row">'+escapeHtml(f.label)+'</th><td>'+escapeHtml(draft[f.id])+' '+escapeHtml(f.unit)+'</td></tr>').join('');
+  const option=step.choice && /^\d+$/.test(draft.choice||'') && step.choice.options[Number(draft.choice)];
+  if (!rows && !option) return '';
+  return '<details class="prior-data previous-inputs"><summary>Ihre früheren Eingaben</summary><p>Diese Werte stammen aus Ihrer Bearbeitung mit einzelnen Antwortfeldern. Im neuen Arbeitsblatt können Sie den Rechenweg dazu aufbauen.</p><table class="data-table"><tbody>'+rows+'</tbody></table>'+(option?'<p>'+escapeHtml(option)+'</p>':'')+'</details>';
+}
+function facts(i) {
+  const step=stages[i];
+  const earlier=stages.slice(0,i).filter(s=>s.exhibits.length).map(s=>'<details class="prior-data"><summary>'+escapeHtml(s.nav)+'</summary>'+exhibits(s)+'</details>').join('');
+  return '<aside class="case-facts" aria-label="Falldaten"><details class="current-facts" open><summary>Falldaten</summary><div>'+exhibits(step)+'</div></details>'+(earlier?'<details class="older-exhibits"><summary>Falldaten früherer Schritte</summary>'+earlier+'</details>':'')+archivedInputs(i)+'</aside>';
+}
+function decision(step) {
+  if (!step.choice) return '';
+  const opts=step.choice.options.map((option,i)=>'<label class="choice-item"><input type="radio" name="choice" data-choice value="'+i+'" '+(state.choice===String(i)?'checked':'')+'><span>'+escapeHtml(option)+'</span></label>').join('');
+  return '<fieldset class="choice-group"><legend>'+escapeHtml(step.choice.question)+'</legend>'+opts+'</fieldset>';
+}
+function stepButtons() {
+  const prev=current===0?'<button type="button" class="button-secondary" data-home>Zur Übersicht</button>':'<button type="button" class="button-secondary" data-step="'+(current-1)+'">Zurück</button>';
+  const passed=current<state.completed;
+  const next=current===last-1?'Zur Auswertung':'Weiter zu Schritt '+(current+2);
+  return prev+(passed?'<button type="button" class="button-primary" data-step="'+(current+1)+'">'+next+'</button>':'<button type="button" class="button-primary" id="check-workbook">'+(current===0?'EBIT prüfen':'Antworten prüfen')+'</button>');
+}
+function guidance() {
+  return '<div id="guv-hint" class="worksheet-tip" hidden><h3>Tipp zum GuV-Aufbau</h3><p>Beginnen Sie mit den Umsatzerlösen aus Absatzmenge und Stückpreis. Nach Abzug der variablen Kosten und der zahlungswirksamen Fixkosten erhalten Sie das EBITDA. Welche Aufwandsposition fehlt noch für den Übergang zum EBIT?</p><p>Prüfen Sie die Einheiten. Der Stückpreis ist in Euro angegeben, die Fixkosten und Abschreibungen in Mio. €.</p></div>';
+}
+function workArea(i) {
+  const step=stages[i];
+  return '<div class="worksheet-layout">'+facts(i)+'<section class="sheet-task" aria-labelledby="worksheet-heading"><h2 id="worksheet-heading">Ihr Bewertungsblatt</h2>'+
+    '<p class="task-prompt">'+escapeHtml(step.prompt)+'</p><div id="workbook-host"></div>'+
+    (i===0?guidance():'<details class="hint"><summary>Rechenhinweis anzeigen</summary><p>'+escapeHtml(step.hint)+'</p></details>')+
+    decision(step)+'<div id="case-feedback" class="feedback" role="status" aria-live="polite" hidden></div><div class="action-row">'+stepButtons()+'</div></section></div>';
+}
+function finish() {
+  const values=computeSheet(last-1, state.raw);
+  const conclusion=summarizeValuation({
+    dcf:values.B44.value, kgv:values.B63.value, evEbitda:values.B64.value,
+    offerPremium:100*values.B70.value, terminalWeight:100*values.B71.value
+  });
+  return '<div class="conclusion"><p class="eyebrow">Auswertung</p><h1 class="step-title" id="step-title" tabindex="-1">'+escapeHtml(conclusion.title)+'</h1><p class="intro">'+escapeHtml(conclusion.paragraphs[0])+'</p>'+
+    comparisonChart(conclusion.comparisons)+conclusion.paragraphs.slice(1).map(p=>'<p>'+escapeHtml(p)+'</p>').join('')+
+    '<h2>Diskussion im Seminar</h2><ol class="discussion-list">'+conclusion.discussion.map(t=>'<li>'+escapeHtml(t)+'</li>').join('')+'</ol>'+
+    '<details class="finished-sheet"><summary>Vollständiges Bewertungsblatt ansehen</summary><p class="table-note">Unter „Zurück zum Werturteil“ können Sie Ihre Berechnung weiterbearbeiten.</p><div id="final-workbook"></div></details>'+
+    '<div class="action-row"><button type="button" class="button-secondary" data-step="'+(last-1)+'">Zurück zum Werturteil</button><button type="button" class="button-primary" data-home>Zur Fallübersicht</button></div>'+
+    '<details class="hint reset-case"><summary>Fallstudie neu beginnen</summary><p>Der Neustart löscht die Einträge und den Fortschritt dieses Bewertungsblatts auf diesem Gerät.</p><button type="button" class="button-secondary" data-reset>Arbeitsblatt leeren und neu beginnen</button></details></div>';
+}
+function finishedWorkbook() {
+  const detail=workspace.querySelector('.finished-sheet');
+  if(!detail)return;
+  detail.addEventListener('toggle',()=>{
+    if(!detail.open||workbook||current!==last)return;
+    const rows=rowsThrough[last-1];
+    const full=sheetValues(rows,state.raw);
+    const frozen=rows.map(row=>{
+      const headers={...row.headers};
+      for(const col of row.editable) headers[col]=full[col+row.row]??'';
+      return {...row,editable:[],headers};
+    });
+    workbook=mountWorkbook(detail.querySelector('#final-workbook'),{rows:frozen,raw:{},onChange:()=>{},marks:{},viewKey:'abschluss',focusAddress:'A1'});
   });
 }
-
-function sidebar() {
-  const items = steps.map((step, i) => {
-    const done = i < state.completed;
-    const locked = i > state.completed;
-    const status = done ? ', bearbeitet' : locked ? ', gesperrt' : '';
-    return `<li><button type="button" class="step-link${done ? ' is-complete' : ''}" data-step="${i}"
-      aria-label="Schritt ${i + 1}, ${escapeHtml(step.nav)}${status}" ${i === current ? 'aria-current="step"' : ''} ${locked ? 'disabled' : ''}>
-      <span class="step-number" aria-hidden="true">${done ? '✓' : String(i + 1).padStart(2, '0')}</span>
-      <span class="step-name">${escapeHtml(step.nav)}</span></button></li>`;
-  }).join('');
-  return `<nav aria-label="Bearbeitungsfortschritt">
-    <h2 class="side-heading">Ihre Bearbeitung</h2>
-    <p class="progress-label" id="case-progress-label">${state.completed} von ${last} Schritten abgeschlossen</p>
-    <progress class="case-progress" aria-labelledby="case-progress-label" value="${state.completed}" max="${last}"></progress>
-    <ol class="step-list">${items}</ol>
-    ${state.completed === last && current !== last ? '<button class="back-link" type="button" data-step="' + last + '">Auswertung ansehen</button>' : ''}
-    <button class="back-link" type="button" data-home>Zur Fallübersicht</button>
-  </nav>`;
+function refreshNavigation() {
+  const nav=workspace.querySelector('.study-path');
+  if(nav)nav.outerHTML=progress();
+  const bar=workspace.querySelector('.sheet-task .action-row');
+  if(bar)bar.innerHTML=stepButtons();
+  labelStart();
 }
-
-function exhibits(step) {
-  return step.exhibits.map((item, idx) => {
-    const titleId = 'exhibit-' + idx;
-    const headings = item.headers.map(text => '<th scope="col">' + escapeHtml(text) + '</th>').join('');
-    const rows = item.rows.map(row => {
-      const cells = row.slice(1).map(text => '<td>' + escapeHtml(text) + '</td>').join('');
-      return '<tr><th scope="row">' + escapeHtml(row[0]) + '</th>' + cells + '</tr>';
-    }).join('');
-    return `<section class="exhibit" aria-labelledby="${titleId}">
-      <h3 id="${titleId}">${escapeHtml(item.title)}</h3>
-      <div class="table-scroll" tabindex="0" role="region" aria-labelledby="${titleId}">
-      <table class="data-table" aria-labelledby="${titleId}"><thead><tr>${headings}</tr></thead><tbody>${rows}</tbody></table></div>
-      ${item.note ? '<p class="table-note">' + escapeHtml(item.note) + '</p>' : ''}
-    </section>`;
-  }).join('');
+function setFeedback(message,status='info') {
+  const box=workspace.querySelector('#case-feedback');
+  if(!box)return;
+  box.dataset.state=status;
+  box.hidden=!message;
+  box.textContent=message;
 }
-
-function answerField(field, draft) {
-  const fieldId = 'answer-' + field.id;
-  return `<div class="answer-field">
-    <label for="${fieldId}">${escapeHtml(field.label)}</label>
-    <div class="input-wrap"><input id="${fieldId}" name="${escapeHtml(field.id)}" data-answer="${escapeHtml(field.id)}"
-      type="text" inputmode="decimal" autocomplete="off" spellcheck="false" maxlength="80"
-      aria-describedby="${fieldId}-unit ${fieldId}-error" value="${escapeHtml(draft[field.id] || '')}">
-      <span class="unit" id="${fieldId}-unit">${escapeHtml(field.unit)}</span></div>
-    <p class="field-error" id="${fieldId}-error" hidden></p>
-  </div>`;
+function showValidation(result) {
+  workbook?.setMarks(result.marks);
+  const hint=workspace.querySelector('#guv-hint');
+  if(hint)hint.hidden=!result.showGuvHint;
+  if(result.passed){setFeedback('Richtig. '+stages[current].success,'success');return;}
+  const box=workspace.querySelector('#case-feedback');
+  box.hidden=false;box.dataset.state='error';
+  const issues=[...new Set(result.issues)];
+  box.innerHTML='<strong>Prüfen Sie Ihre Eingaben.</strong><ul>'+issues.map(t=>'<li>'+escapeHtml(t)+'</li>').join('')+'</ul>';
 }
-
-function choiceField(choice, draft) {
-  if (!choice) return '';
-  const choices = choice.options.map((text, i) => `<label class="choice-item">
-    <input type="radio" name="choice" value="${i}" data-choice aria-describedby="choice-error" ${draft.choice === String(i) ? 'checked' : ''}>
-    <span>${escapeHtml(text)}</span></label>`).join('');
-  return `<fieldset class="choice-group"><legend>${escapeHtml(choice.question)}</legend>
-    ${choices}<p class="field-error" id="choice-error" hidden></p></fieldset>`;
-}
-
-function actions() {
-  const passed = current < state.completed;
-  const previous = current === 0 ? '<button type="button" class="button-secondary" data-home>Zur Übersicht</button>' :
-    '<button type="button" class="button-secondary" data-step="' + (current - 1) + '">Zurück</button>';
-  const next = current === last - 1 ? 'Zur Auswertung' : 'Weiter zu Schritt ' + (current + 2);
-  const primary = passed ? '<button class="button-primary" type="button" data-step="' + (current + 1) + '">' + next + '</button>' :
-    '<button class="button-primary" type="submit">Antworten prüfen</button>';
-  return previous + primary;
-}
-
-function stepContent() {
-  const step = steps[current];
-  const draft = state.drafts[step.id];
-  const passed = current < state.completed;
-  return `<p class="eyebrow">Schritt ${String(current + 1).padStart(2, '0')} von ${String(last).padStart(2, '0')}</p>
-    <h1 class="step-title" id="step-title" tabindex="-1">${escapeHtml(step.title)}</h1>
-    <p class="chapter-ref">${escapeHtml(step.chapter)}</p>
-    <p class="intro">${escapeHtml(step.intro)}</p>
-    ${exhibits(step)}
-    <form class="task-form" novalidate>
-      <h2>Ihre Aufgabe</h2>
-      <p class="task-prompt">${escapeHtml(step.prompt)}</p>
-      <p class="entry-note">Rechnen Sie mit ungerundeten Zwischenwerten. Geben Sie Ergebnisse auf zwei Nachkommastellen an. Komma und Punkt sind als Dezimalzeichen möglich.</p>
-      <div class="answer-grid">${step.fields.map(field => answerField(field, draft)).join('')}</div>
-      ${choiceField(step.choice, draft)}
-      <details class="hint"><summary>Rechenhinweis anzeigen</summary><p>${escapeHtml(step.hint)}</p></details>
-      <div class="feedback" id="case-feedback" role="status" aria-live="polite" data-state="${passed ? 'success' : ''}" ${passed ? '' : 'hidden'}>${passed ? 'Richtig. ' + escapeHtml(step.success) : ''}</div>
-      <div class="action-row">${actions()}</div>
-    </form>`;
-}
-
-function finalContent() {
-  return `<div class="conclusion">
-    <p class="eyebrow">Auswertung</p>
-    <h1 class="step-title" id="step-title" tabindex="-1">${escapeHtml(conclusion.title)}</h1>
-    <div class="intro"><p>${escapeHtml(conclusion.paragraphs[0])}</p></div>
-    ${comparisonChart(conclusion.comparisons)}
-    ${conclusion.paragraphs.slice(1).map(text => '<p>' + escapeHtml(text) + '</p>').join('')}
-    <h2>Diskussion im Seminar</h2>
-    <ol class="discussion-list">${conclusion.discussion.map(text => '<li>' + escapeHtml(text) + '</li>').join('')}</ol>
-    <div class="action-row"><button type="button" class="button-secondary" data-step="${last - 1}">Zurück zum Werturteil</button>
-      <button type="button" class="button-primary" data-home>Zur Fallübersicht</button></div>
-    <details class="hint reset-case"><summary>Fallstudie neu beginnen</summary>
-      <p>Beim Neustart werden die Antworten und der Fortschritt dieser Fallstudie auf diesem Gerät gelöscht.</p>
-      <button class="button-secondary" type="button" data-reset>Antworten löschen und neu beginnen</button></details>
-  </div>`;
-}
-
-function showPage(index, focus = true) {
-  current = index;
-  workspace.hidden = index === null;
-  overview.hidden = index !== null;
-  updateStartLabels();
-  if (index === null) {
-    if (focus) {
-      const title = overview.querySelector('h1');
-      if (title) {
-        title.setAttribute('tabindex', '-1');
-        title.focus({ preventScroll: true });
-      }
-      window.scrollTo(0, 0);
+function updateEntries(addresses) {
+  if(current===null||current===last||!addresses.length)return;
+  const owner=Math.min(...addresses.map(address=>cellsByStage.get(address)??current));
+  const previousCompleted=state.completed;
+  for(let i=owner;i<previousCompleted;i++){
+    if(!evaluate(i,state).passed){
+      state.completed=i;
+      state.opened=Math.min(state.opened,i);
+      break;
     }
-    return;
-  }
-  workspace.innerHTML = `<div class="case-layout">
-    <aside class="case-sidebar">${sidebar()}</aside>
-    <article class="case-content" aria-labelledby="step-title">${index === last ? finalContent() : stepContent()}
-      ${storageWorks ? '' : '<p class="table-note">Ihr Browser kann die Bearbeitung nur bis zum Schließen dieser Seite behalten.</p>'}
-    </article></div>`;
-  if (focus) {
-    workspace.querySelector('#step-title').focus({ preventScroll: true });
-    window.scrollTo(0, 0);
-  }
-}
-
-function routeHash(index) {
-  return index === null ? '' : index === last ? '#auswertung' : '#schritt-' + (index + 1);
-}
-
-function navigate(index) {
-  if (index !== null && (!Number.isInteger(index) || index < 0 || index > state.completed)) return;
-  const hash = routeHash(index);
-  if (location.hash !== hash) {
-    const url = new URL(location.href);
-    url.hash = hash;
-    history.pushState(null, '', url);
-  }
-  showPage(index);
-}
-
-function readRoute(focus = true) {
-  const hash = location.hash;
-  let requested = null;
-  if (hash === '#auswertung') requested = last;
-  const match = /^#schritt-([1-9]\d*)$/.exec(hash);
-  if (match) requested = Number(match[1]) - 1;
-  if (requested !== null && requested > state.completed) {
-    requested = state.completed;
-    const url = new URL(location.href);
-    url.hash = routeHash(requested);
-    history.replaceState(null, '', url);
-  }
-  showPage(requested, focus);
-}
-
-function showFieldStatus(input, errorNode, message) {
-  if (message) input.setAttribute('aria-invalid', 'true');
-  else input.removeAttribute('aria-invalid');
-  errorNode.textContent = message;
-  errorNode.hidden = !message;
-}
-
-function onEdit(event) {
-  const input = event.target;
-  if (current === null || current === last || !input.matches('[data-answer], [data-choice]')) return;
-  const step = steps[current];
-  const isChoice = input.hasAttribute('data-choice');
-  const key = isChoice ? 'choice' : input.dataset.answer;
-  const draft = state.drafts[step.id];
-  if (draft[key] === input.value) return;
-  draft[key] = input.value;
-  if (state.completed > current) {
-    state.completed = current;
-    workspace.querySelector('.case-sidebar').innerHTML = sidebar();
-    workspace.querySelector('.action-row').innerHTML = actions();
-  }
-  const feedback = workspace.querySelector('#case-feedback');
-  feedback.hidden = true;
-  feedback.textContent = '';
-  if (isChoice) {
-    for (const radio of workspace.querySelectorAll('[data-choice]')) radio.removeAttribute('aria-invalid');
-    workspace.querySelector('#choice-error').hidden = true;
-  } else {
-    showFieldStatus(input, document.getElementById(input.id + '-error'), '');
   }
   save();
+  if(state.completed<previousCompleted && (current>state.completed || visibleEnd>state.opened)){
+    const destination=Math.min(current,state.completed);
+    const generation=renderGeneration;
+    queueMicrotask(()=>{
+      if(generation!==renderGeneration)return;
+      route(destination,true,addresses[0]);
+      setFeedback('Ihre Änderung ist gespeichert. Prüfen Sie Schritt '+(state.completed+1)+' erneut, um die folgenden Teile wieder zu öffnen.');
+    });
+    return;
+  }
+  if(current<state.completed){
+    showValidation(evaluate(current,state));
+  }else{
+    workbook?.setMarks({});
+    setFeedback('');
+  }
+  if(state.completed!==previousCompleted)refreshNavigation();
+  else labelStart();
 }
-
-workspace.addEventListener('input', onEdit);
-workspace.addEventListener('change', onEdit);
-
-workspace.addEventListener('submit', event => {
-  event.preventDefault();
-  if (current === null || current === last) return;
-  if (current < state.completed) {
-    navigate(current + 1);
+let visibleEnd=0;
+function show(index, focus=true, focusAddress) {
+  const previous=workbook;
+  workbook=null; previous?.destroy(); renderGeneration++;
+  current=index;
+  workspace.hidden=index===null;
+  overview.hidden=index!==null;
+  labelStart();
+  if(index===null){
+    workspace.replaceChildren();
+    if(focus){const h=overview.querySelector('h1');h.tabIndex=-1;h.focus({preventScroll:true});window.scrollTo(0,0);}
     return;
   }
-  const step = steps[current];
-  const draft = state.drafts[step.id];
-  const form = event.target;
-  const invalid = [];
-  for (const field of step.fields) {
-    const input = form.elements.namedItem(field.id);
-    draft[field.id] = input.value;
-    let message = '';
-    if (!input.value.trim()) message = 'Bitte geben Sie ein Ergebnis ein.';
-    else if (!Number.isFinite(numberFromInput(input.value, field.unit))) message = 'Bitte geben Sie eine Zahl mit Dezimalkomma oder Dezimalpunkt ein.';
-    else if (!fieldIsCorrect(field, draft)) message = field.hint;
-    showFieldStatus(input, document.getElementById(input.id + '-error'), message);
-    if (message) invalid.push(input);
-  }
-  if (step.choice) {
-    const chosen = form.querySelector('[data-choice]:checked');
-    const choice = form.querySelector('[data-choice]');
-    draft.choice = chosen?.value ?? '';
-    const message = chosen ? (choiceIsCorrect(step, draft) ? '' : step.choice.hint) : 'Bitte wählen Sie eine Aussage aus.';
-    showFieldStatus(chosen || choice, form.querySelector('#choice-error'), message);
-    if (message) invalid.push(chosen || choice);
-  }
-  const feedback = form.querySelector('#case-feedback');
-  feedback.hidden = false;
-  if (invalid.length) {
-    feedback.dataset.state = 'error';
-    feedback.textContent = invalid.length === 1 ? 'Eine Antwort ist noch offen. Beachten Sie den Hinweis am markierten Feld.' :
-      invalid.length + ' Antworten sind noch offen. Beachten Sie die Hinweise an den markierten Feldern.';
-    invalid[0].focus();
-  } else {
-    state.completed = current + 1;
-    feedback.dataset.state = 'success';
-    feedback.textContent = 'Richtig. ' + step.success;
-    workspace.querySelector('.case-sidebar').innerHTML = sidebar();
-    form.querySelector('.action-row').innerHTML = actions();
-    form.querySelector('.button-primary').focus({ preventScroll: true });
-  }
+  if(index<last)state.opened=Math.max(state.opened,index);
+  visibleEnd=Math.min(state.opened,state.completed,last-1);
+  const step=stages[index];
+  const body=index===last?finish():
+    '<p class="eyebrow">Schritt '+(index+1)+' von '+last+'</p><h1 class="step-title" id="step-title" tabindex="-1">'+escapeHtml(step.title)+'</h1><p class="chapter-ref">'+escapeHtml(step.chapter)+'</p><p class="intro">'+escapeHtml(step.intro)+'</p>'+workArea(index);
+  workspace.innerHTML=progress()+'<article class="study-body" aria-labelledby="step-title">'+body+'</article><p class="table-note" id="storage-warning" '+(storageWorks?'hidden':'')+'>Ihr Browser kann den Bearbeitungsstand nur bis zum Schließen dieser Seite behalten.</p>';
+  if(index<last){
+    const starting=step.rows.find(r=>r.editable.length);
+    const firstCell=starting.editable[0]+starting.row;
+    workbook=mountWorkbook(workspace.querySelector('#workbook-host'),{
+      rows:rowsThrough[visibleEnd], raw:state.raw, marks:{},
+      onChange:({addresses})=>updateEntries(addresses), viewKey:step.id,
+      focusAddress:focusAddress??firstCell, startRow:focusAddress ? undefined : step.rows[0].row
+    });
+    if(index<state.completed)showValidation(evaluate(index,state));
+  }else finishedWorkbook();
   save();
-});
-
-document.addEventListener('click', event => {
-  if (event.target.closest('.skip')) {
-    event.preventDefault();
-    const title = current === null ? overview.querySelector('h1') : workspace.querySelector('#step-title');
-    if (title) {
-      title.setAttribute('tabindex', '-1');
-      title.focus();
-      title.scrollIntoView({ block: 'start' });
+  if(focus){workspace.querySelector('#step-title').focus({preventScroll:true});window.scrollTo(0,0);}
+}
+function hashFor(index){return index===null?'':index===last?'#auswertung':'#schritt-'+(index+1);}
+function route(index,replace=false,focusAddress) {
+  workbook?.commit();
+  if(index!==null && (!Number.isInteger(index)||index<0||index>state.completed))return;
+  const hash=hashFor(index);
+  if(location.hash!==hash){
+    const url=new URL(location.href);url.hash=hash;
+    history[replace?'replaceState':'pushState'](null,'',url);
+  }
+  show(index,true,focusAddress);
+}
+function readRoute(focus=true) {
+  workbook?.commit();
+  const match=/^#schritt-([1-9]\d*)$/.exec(location.hash);
+  let index=location.hash==='#auswertung'?last:match?Math.min(Number(match[1])-1,last-1):null;
+  if(index!==null){
+    index=Math.min(index,state.completed);
+    if(location.hash!==hashFor(index)){
+      const url=new URL(location.href);url.hash=hashFor(index);history.replaceState(null,'',url);
     }
+  }
+  show(index,focus);
+}
+workspace.addEventListener('change',e=>{
+  if(!e.target.matches('[data-choice]')||current===null||!stages[current]?.choice)return;
+  state.choice=e.target.value;
+  if(current<state.completed)state.completed=current;
+  workbook?.setMarks({});setFeedback('');refreshNavigation();save();
+});
+document.addEventListener('click',e=>{
+  const btn=e.target.closest('[data-start],[data-home],[data-step],[data-reset],#check-workbook,.skip');
+  if(!btn || btn.disabled)return;
+  e.preventDefault();
+  if(btn.matches('.skip')){
+    const h=current===null?overview.querySelector('h1'):workspace.querySelector('#step-title');h.tabIndex=-1;h.focus();h.scrollIntoView({block:'start'});return;
+  }
+  if(btn.id==='check-workbook'){
+    workbook?.commit();
+    if(current===null || current>=last || current>state.completed)return;
+    const result=evaluate(current,state);
+    if(result.passed){state.completed=Math.max(state.completed,current+1);refreshNavigation();save();}
+    showValidation(result);
+    if(result.passed)workspace.querySelector('.action-row .button-primary')?.focus({preventScroll:true});
     return;
   }
-  const button = event.target.closest('[data-start], [data-home], [data-step], [data-reset]');
-  if (!button || button.disabled) return;
-  event.preventDefault();
-  if (button.hasAttribute('data-start')) navigate(state.completed);
-  else if (button.hasAttribute('data-home')) navigate(null);
-  else if (button.hasAttribute('data-step')) navigate(Number(button.dataset.step));
-  else {
-    state = { drafts: Object.fromEntries(steps.map(step => [step.id, {}])), completed: 0 };
-    save();
-    navigate(0);
+  if(btn.hasAttribute('data-reset')){
+    workbook?.destroy();workbook=null;state=fresh();save();route(0);return;
   }
+  if(btn.hasAttribute('data-home'))route(null);
+  else if(btn.hasAttribute('data-start'))route(state.completed);
+  else route(Number(btn.dataset.step));
 });
-
-window.addEventListener('popstate', () => readRoute());
-window.addEventListener('hashchange', () => {
-  const isCaseHash = location.hash === '#auswertung' || /^#schritt-\d+$/.test(location.hash);
-  if (isCaseHash || current !== null) readRoute();
-});
+window.addEventListener('popstate',()=>readRoute());
+window.addEventListener('hashchange',()=>{if(location.hash!==hashFor(current))readRoute();});
+document.addEventListener('visibilitychange',()=>{if(document.hidden)workbook?.commit();});
+window.addEventListener('pagehide',()=>workbook?.commit());
 readRoute(false);
