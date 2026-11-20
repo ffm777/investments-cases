@@ -1,5 +1,5 @@
-import { steps } from './case.mjs?v=arbeitsblatt';
-import { references } from './formula.mjs';
+import { financialPeriods, steps } from './case.mjs?v=3';
+import { references } from './formula.mjs?v=3';
 
 const allColumns = ['A', 'B', 'C', 'D'];
 const valueColumns = ['B', 'C', 'D'];
@@ -11,7 +11,7 @@ function section(row, title) {
 
 function scratch(first, last) {
   return Array.from({ length: last - first + 1 }, (_, n) => ({
-    row: first + n, editable: [...allColumns]
+    row: first + n, scratch: true, editable: [...allColumns]
   }));
 }
 
@@ -85,20 +85,20 @@ export const stages = [
     ...capital,
     exhibits: [capitalInputs],
     prompt: 'Errechnen Sie in B30 die Eigenkapitalkosten nach CAPM und in B31 die Fremdkapitalkosten vor Steuern. Ermitteln Sie in B32 den WACC bei Mainwerks Zielkapitalstruktur. Für Zinssätze können Sie das Prozentzeichen oder den entsprechenden Dezimalbruch verwenden, beispielsweise 4 % oder 0,04.',
-    rows: [section(23,'Kapitalkosten'), ...scratch(24,29),
+    rows: [section(23,'Kapitalkosten'), ...scratch(24,29).map(row => ({...row, existingOnly:true})),
       result(30,'Eigenkapitalkosten',['B'],'percent'), result(31,'Fremdkapitalkosten vor Steuern',['B'],'percent'), result(32,'WACC',['B'],'percent')],
     targets: [target(capital,'costEquity','B30'), target(capital,'costDebt','B31'), target(capital,'wacc','B32')]
   },
   {
     ...dcf,
     exhibits: [financing],
-    prompt: 'Zinsen Sie mit Ihrem WACC aus B32 die Free Cash Flows aus Zeile 22 und den Terminal Value auf den Bewertungsstichtag ab. Ermitteln Sie in B40 den Terminal Value Ende 2029, in B41 dessen Barwert und in B42 den Enterprise Value. Leiten Sie in B43 den Eigenkapitalwert und in B44 den Wert je Aktie ab.',
+    prompt: 'Berechnen Sie den Terminal Value zum 31.12.2029 in D40, der Spalte des letzten Planjahrs. Zinsen Sie ihn mit Ihrem WACC aus B32 auf den 31.12.2026 ab und tragen Sie den Barwert in B41 ein. Ermitteln Sie mit den Free Cash Flows aus Zeile 22 den Enterprise Value in B42, den Eigenkapitalwert in B43 und den Wert je Aktie in B44.',
     hint: 'Für den Terminal Value Ende 2029 teilen Sie den erwarteten FCF 2030 durch die Differenz aus WACC und Wachstumsrate. Zinsen Sie jede Zahlung über die Zahl der Jahre bis zu ihrem Zufluss ab. Für den Terminal Value sind es drei Jahre. Verwenden Sie Zellbezüge, damit Ihre Formeln mit den ungerundeten Zwischenwerten rechnen.',
     rows: [section(33,'DCF-Bewertung'), ...scratch(34,39),
-      result(40,'Terminal Value Ende 2029 (Mio. €)'),result(41,'Barwert des Terminal Value (Mio. €)'),
+      result(40,'Terminal Value Ende 2029 (Mio. €)',['D']),result(41,'Barwert des Terminal Value zum 31.12.2026 (Mio. €)'),
       result(42,'Enterprise Value (Mio. €)'),result(43,'Eigenkapitalwert (Mio. €)'),result(44,'DCF-Wert je Aktie (€)',['B'],'money')],
     targets: [
-      target(dcf,'terminalValue','B40',{needs:['D22','B32']}),
+      target(dcf,'terminalValue','D40',{needs:['D22','B32']}),
       {...customTarget('B41','Barwert des Terminal Value',terminalPV,'Zinsen Sie den Wert vom 31.12.2029 über drei Jahre auf den 31.12.2026 ab.'), needs:['B32','D22']},
       target(dcf,'enterpriseValue','B42',{needs:['B22','C22','D22','B32']}),
       target(dcf,'equityValue','B43'),target(dcf,'dcfPerShare','B44')
@@ -111,7 +111,7 @@ export const stages = [
     prompt:'Berechnen Sie für jedes der drei Unternehmen in Zeile 52 das Kurs-Gewinn-Verhältnis auf Basis des erwarteten Gewinns 2027 (Forward-KGV) und in Zeile 53 den Multiplikator EV/EBITDA. Ermitteln Sie die Mediane in B61 und B62. Verwenden Sie Ihre GuV für 2027, um Mainwerks Jahresüberschuss und EBITDA zu bestimmen. Wenden Sie darauf die Mediane an und berechnen Sie in B63 und B64 die beiden Werte je Aktie.',
     rows:[section(45,'Peer-Multiplikatoren'),peerHead,...peerRows,...scratch(51,51),
       result(52,'KGV je Peer',valueColumns,'multiple'),result(53,'EV/EBITDA je Peer',valueColumns,'multiple'),
-      section(54,'Bewertung von Mainwerk'),...scratch(55,60),
+      {...section(54,'Bewertung von Mainwerk'),optionalRows:[55,56,57,58,59,60]},...scratch(55,60),
       result(61,'Peer-Median KGV',['B'],'multiple'),result(62,'Peer-Median EV/EBITDA',['B'],'multiple'),
       result(63,'Wert je Aktie aus KGV (€)',['B'],'money'),result(64,'Wert je Aktie aus EV/EBITDA (€)',['B'],'money')],
     targets:[
@@ -150,6 +150,49 @@ function ancestors(address, raw, valid, include = () => true) {
   return found;
 }
 
+const moneyFormat = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const listFormat = new Intl.ListFormat('de-DE', { type: 'conjunction' });
+
+function diagnosePlanningError(stageId, target, value) {
+  if (!Number.isFinite(value) || (stageId !== 'ebit' && stageId !== 'fcf')) return null;
+  const period = financialPeriods[valueColumns.indexOf(target.address[0])];
+  const matches = candidate => Math.abs(value - candidate) <= target.tolerance + 1e-10;
+
+  if (stageId === 'fcf') {
+    // The closing balance exceeds this year's increase by the opening balance.
+    if (!matches(target.expected - period.openingNwc)) return null;
+    return {
+      reason: 'nwcBalance',
+      detail: 'Ihr FCF passt zu einem Abzug des gesamten NWC-Bestands von ' + moneyFormat.format(period.closingNwc) +
+        ' Mio. € am Jahresende. Ende ' + (period.year - 1) + ' waren bereits ' + moneyFormat.format(period.openingNwc) +
+        ' Mio. € gebunden. Ziehen Sie deshalb nur die Veränderung zwischen den beiden Jahresendbeständen ab.'
+    };
+  }
+
+  const costs = [
+    { name: 'den variablen Kosten', amount: period.variableCosts },
+    { name: 'den zahlungswirksamen Fixkosten', amount: period.fixedCosts },
+    { name: 'den Abschreibungen', amount: period.depreciation }
+  ];
+  // Adding an expense instead of subtracting it raises EBIT by twice its amount.
+  const combinations = [[]];
+  for (const cost of costs) combinations.push(...combinations.map(group => [...group, cost]));
+  const matched = combinations.find(group => group.length && matches(
+    target.expected + 2 * group.reduce((sum, cost) => sum + cost.amount, 0)
+  ));
+  if (matched) {
+    return {
+      reason: 'costSign',
+      detail: 'Prüfen Sie das Vorzeichen bei ' + listFormat.format(matched.map(cost => cost.name)) +
+        '. Ihr EBIT entspricht einer Rechnung, in der diese Kosten das Ergebnis erhöhen. Ziehen Sie positiv erfasste Kosten ab. Negativ erfasste Kosten können Sie mit den Erlösen summieren.'
+    };
+  }
+  if (matches(-target.expected)) {
+    return { reason: 'ebitSign', detail: 'Der Betrag Ihres EBIT stimmt, sein Vorzeichen ist umgekehrt. Prüfen Sie, ob Sie die Kosten vom Umsatz abziehen und welches Vorzeichen Ihre Ergebnisformel verwendet.' };
+  }
+  return null;
+}
+
 export function validateStage(index, raw, computed, choice) {
   const stage = stages[index];
   const valid = new Set(Object.keys(computed));
@@ -164,7 +207,9 @@ export function validateStage(index, raw, computed, choice) {
     } else if (result?.error) {
       reason = 'formulaError'; detail = result.error;
     } else if (typeof result?.value !== 'number' || !Number.isFinite(result.value) || Math.abs(result.value-t.expected)>t.tolerance+1e-10) {
-      reason = 'value'; detail = t.hint;
+      const diagnosis = diagnosePlanningError(stage.id, t, result?.value);
+      reason = diagnosis?.reason ?? 'value';
+      detail = diagnosis?.detail ?? t.hint;
       if (t.kind==='percent' && typeof result?.value==='number' && Math.abs(result.value/100-t.expected)<=t.tolerance) {
         detail = 'Verwenden Sie eine Prozentzahl mit %-Zeichen oder den entsprechenden Dezimalbruch.';
       }

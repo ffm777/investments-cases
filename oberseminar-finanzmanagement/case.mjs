@@ -78,6 +78,15 @@ const stockFacts = () => table('Aktien und Finanzierung am Stichtag', ['Position
   ['Ausstehende Stammaktien', de(assumptions.sharesInMillions, 0) + ' Mio. Stück']
 ], 'Alle Aktien haben dieselben Rechte. Weitere Positionen für die Überleitung zum Eigenkapital gibt es im Fall nicht.');
 
+export const financialPeriods = plan.map((period, i) => ({
+  year: years[i],
+  variableCosts: revenue(period) * assumptions.variableCostShare,
+  fixedCosts: period.cashFixedCosts,
+  depreciation: period.depreciation,
+  openingNwc: revenue(i === 0 ? history : plan[i - 1]) * assumptions.workingCapitalShare,
+  closingNwc: revenue(period) * assumptions.workingCapitalShare
+}));
+
 export const steps = [
   {
     id: 'ebit', nav: 'EBIT-Prognose', title: 'Das operative Ergebnis planen',

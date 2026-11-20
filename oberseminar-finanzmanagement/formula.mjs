@@ -1,3 +1,5 @@
+// Relocating a reference inside a range can make a previously saved formula longer.
+export const maxFormulaLength = 8192;
 const addressPattern = /^(\$?)([A-Z]+)(\$?)([1-9]\d*)$/i;
 const numberPattern = /^(?:\d{1,3}(?:\.\d{3})+,\d+|\d{1,3}(?:,\d{3})+\.\d+|\d{1,3}(?:\.\d{3}){2,}|\d{1,3}(?:,\d{3}){2,}|\d+(?:[.,]\d+)?|[.,]\d+)(?:e[+-]?\d+)?/i;
 const syntaxError = 'Bitte prüfen Sie die Schreibweise der Formel.';
@@ -45,7 +47,7 @@ function translate(raw, dx, dy = 0) {
 }
 
 function tokensFor(expression) {
-  if (expression.length > 800) throw new Error('Die Formel ist zu lang.');
+  if (expression.length > maxFormulaLength) throw new Error('Die Formel ist zu lang.');
   // A copied Markdown multiplication or a typographic multiplication sign
   // represents the same operator as an asterisk typed on the keyboard.
   expression = expression.replace(/\\\*|[×·⋅]/g, '*').replace(/−/g, '-');

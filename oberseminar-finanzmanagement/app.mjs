@@ -1,7 +1,8 @@
-import { steps as legacySteps, summarizeValuation } from './case.mjs?v=arbeitsblatt';
-import { stages, validateStage } from './worksheet-case.mjs';
-import { mountWorkbook, sheetValues } from './workbook.mjs';
-import { calculate } from './formula.mjs';
+import { steps as legacySteps, summarizeValuation } from './case.mjs?v=3';
+import { stages, validateStage } from './worksheet-case.mjs?v=3';
+import { mountWorkbook, sheetValues } from './workbook.mjs?v=3';
+import { calculate, maxFormulaLength } from './formula.mjs?v=3';
+import { migrateWorksheet } from './worksheet-migration.mjs';
 import { comparisonChart } from './chart.mjs';
 
 const workspace = document.querySelector('#workspace');
@@ -25,7 +26,7 @@ function load(key) {
   try { return JSON.parse(localStorage.getItem(key)); }
   catch (err) { if (!(err instanceof SyntaxError)) storageWorks = false; return null; }
 }
-function fresh() { return { raw:{}, choice:'', completed:0, opened:0 }; }
+function fresh() { return { version:3, raw:{}, choice:'', completed:0, opened:0 }; }
 function computeSheet(index, raw) {
   const inputs = sheetValues(rowsThrough[index], raw);
   return calculate(inputs, Object.keys(inputs));
@@ -37,8 +38,9 @@ function restore() {
   const stored = load(storageKey);
   const next = fresh();
   if (!stored || typeof stored !== 'object') return next;
-  for (const [addr,value] of Object.entries(stored.raw || {})) {
-    if (cellsByStage.has(addr) && typeof value === 'string' && value) next.raw[addr] = value.slice(0,800);
+  const raw = stored.version === 3 ? stored.raw || {} : migrateWorksheet(stored.raw || {});
+  for (const [addr,value] of Object.entries(raw)) {
+    if (cellsByStage.has(addr) && typeof value === 'string' && value) next.raw[addr] = value.slice(0,maxFormulaLength);
   }
   if (typeof stored.choice === 'string') next.choice = stored.choice;
   const completed = Number.isInteger(stored.completed) ? Math.min(stored.completed,last) : 0;
@@ -47,6 +49,19 @@ function restore() {
   return next;
 }
 let state = restore();
+function compactRows(activeStep,endStep) {
+  const hidden=new Set();
+  for(let i=0;i<=endStep;i++){
+    const rows=stages[i].rows;
+    const optional=new Set(rows.flatMap(row=>row.optionalRows ?? []));
+    for(const row of rows){
+      if(!row.scratch || optional.has(row.row) || (!row.existingOnly && i>=activeStep))continue;
+      const used=row.editable.some(col=>String(state.raw[col+row.row]??'').trim()!=='');
+      if(!used)hidden.add(row.row);
+    }
+  }
+  return hidden;
+}
 const legacy = load('hsrm-mainwerk-fallstudie-2026-v1');
 function save() {
   try { localStorage.setItem(storageKey,JSON.stringify(state)); storageWorks=true; }
@@ -134,7 +149,9 @@ function finishedWorkbook() {
       for(const col of row.editable) headers[col]=full[col+row.row]??'';
       return {...row,editable:[],headers};
     });
-    workbook=mountWorkbook(detail.querySelector('#final-workbook'),{rows:frozen,raw:{},onChange:()=>{},marks:{},viewKey:'abschluss',focusAddress:'A1'});
+    workbook=mountWorkbook(detail.querySelector('#final-workbook'),{
+      rows:frozen,raw:{},hiddenRows:compactRows(last,last-1),viewKey:'abschluss'
+    });
   });
 }
 function refreshNavigation() {
@@ -212,10 +229,11 @@ function show(index, focus=true, focusAddress) {
     '<p class="eyebrow">Schritt '+(index+1)+' von '+last+'</p><h1 class="step-title" id="step-title" tabindex="-1">'+escapeHtml(step.title)+'</h1><p class="chapter-ref">'+escapeHtml(step.chapter)+'</p><p class="intro">'+escapeHtml(step.intro)+'</p>'+workArea(index);
   workspace.innerHTML=progress()+'<article class="study-body" aria-labelledby="step-title">'+body+'</article><p class="table-note" id="storage-warning" '+(storageWorks?'hidden':'')+'>Ihr Browser kann den Bearbeitungsstand nur bis zum Schließen dieser Seite behalten.</p>';
   if(index<last){
-    const starting=step.rows.find(r=>r.editable.length);
+    const hiddenRows=compactRows(index,visibleEnd);
+    const starting=step.rows.find(r=>r.editable.length && !r.existingOnly && !hiddenRows.has(r.row));
     const firstCell=starting.editable[0]+starting.row;
     workbook=mountWorkbook(workspace.querySelector('#workbook-host'),{
-      rows:rowsThrough[visibleEnd], raw:state.raw, marks:{},
+      rows:rowsThrough[visibleEnd], raw:state.raw, marks:{}, hiddenRows,
       onChange:({addresses})=>updateEntries(addresses), viewKey:step.id,
       focusAddress:focusAddress??firstCell, startRow:focusAddress ? undefined : step.rows[0].row
     });

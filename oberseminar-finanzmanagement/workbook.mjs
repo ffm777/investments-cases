@@ -1,4 +1,4 @@
-import { calculate, translate } from './formula.mjs';
+import { calculate, translate, maxFormulaLength } from './formula.mjs?v=3';
 
 const columns = ['A', 'B', 'C', 'D'];
 const directions = {ArrowLeft:[-1,0], ArrowRight:[1,0], ArrowUp:[0,-1], ArrowDown:[0,1]};
@@ -37,7 +37,7 @@ function make(tag, parent, className, text) {
   return node;
 }
 
-export function mountWorkbook(host, {rows, raw, onChange=()=>{}, marks={}, focusAddress, startRow, viewKey}) {
+export function mountWorkbook(host, {rows, raw, onChange=()=>{}, marks={}, focusAddress, startRow, viewKey, hiddenRows=new Set()}) {
   const root = document.createElement('section');
   root.className = 'case-workbook';
   root.setAttribute('aria-label','Arbeitsblatt zur Unternehmensbewertung');
@@ -53,7 +53,7 @@ export function mountWorkbook(host, {rows, raw, onChange=()=>{}, marks={}, focus
   const fx = make('span',barRow,'wb-fx','ƒx'); fx.setAttribute('aria-hidden','true');
   const bar = make('input',barRow,'wb-formula');
   bar.type='text'; bar.setAttribute('aria-label','Formelleiste'); bar.autocomplete='off'; bar.spellcheck=false;
-  bar.maxLength=800; bar.setAttribute('autocapitalize','off');
+  bar.maxLength=maxFormulaLength; bar.setAttribute('autocapitalize','off');
   const apply=make('button',barRow,'wb-apply','✓'); apply.type='button'; apply.setAttribute('aria-label','Eingabe übernehmen'); apply.title='Eingabe übernehmen';
   const scroll=make('div',root,'wb-scroll');
   const table=make('table',scroll,'wb-grid');
@@ -64,12 +64,27 @@ export function mountWorkbook(host, {rows, raw, onChange=()=>{}, marks={}, focus
   make('td',columnHead);
   for(const col of columns) make('th',columnHead,'',col).scope='col';
   const body=table.createTBody(), buttons=new Map(), writable=new Set(), rowById=new Map(), rowNodes=new Map();
-  for(const row of rows){
+  const visibleRows=rows.filter(row=>!hiddenRows.has(row.row));
+  const readOnly=!visibleRows.some(row=>row.editable?.length);
+  const optionalGroups=[];
+  for(const row of visibleRows){
     const tr=body.insertRow();
     rowById.set(row.row,row); rowNodes.set(row.row,tr);
-    if(row.section) tr.classList.add('wb-section');
     if(row.highlight) tr.classList.add('wb-result');
     make('th',tr,'wb-index',row.row).scope='row';
+    if(row.section){
+      tr.className='wb-section';
+      const heading=make('th',tr,'wb-section-heading',row.title || row.label || row.headers?.A);
+      heading.colSpan=columns.length;
+      heading.scope='row';
+      if(row.description)make('span',heading,'wb-section-description',row.description);
+      if(row.optionalRows?.length){
+        const toggle=readOnly ? null : make('button',heading,'wb-toggle-rows');
+        if(toggle)toggle.type='button';
+        optionalGroups.push({numbers:row.optionalRows,toggle,expanded:false});
+      }
+      continue;
+    }
     for(const col of columns){
       const addr=col+row.row, td=tr.insertCell(), b=make('button',td,'wb-cell');
       b.type='button'; b.dataset.addr=addr; b.tabIndex=-1; buttons.set(addr,b);
@@ -77,30 +92,51 @@ export function mountWorkbook(host, {rows, raw, onChange=()=>{}, marks={}, focus
       else td.classList.add('wb-fixed');
     }
   }
-  const valid=new Set(buttons.keys());
-  const readOnly=writable.size===0;
+  // A compact view changes only what can be selected. A formula range can
+  // still include a blank row or the original address of a section heading.
+  const valid=new Set(rows.flatMap(row=>columns.map(col=>col+row.row)));
   if(readOnly) {
     fill.hidden=true;
     apply.hidden=true;
     barRow.classList.add('wb-read-only');
   }
-  const ordered=[...valid], lastRow=rows.at(-1).row;
+  let dataRows=[], ordered=[];
+  function updateOptionalRows(keepRow){
+    for(const group of optionalGroups){
+      let anyEmpty=false;
+      for(const number of group.numbers){
+        const tr=rowNodes.get(number);
+        if(!tr)continue;
+        const empty=columns.every(col=>String(columnValue(rowById.get(number),col,raw)??'').trim()==='');
+        tr.hidden=empty && !group.expanded && number!==keepRow;
+        anyEmpty ||= empty;
+      }
+      if(group.toggle){
+        group.toggle.hidden=!anyEmpty;
+        group.toggle.textContent=group.expanded?'Leere Zwischenzeilen ausblenden':'Zwischenzeilen einblenden';
+        group.toggle.setAttribute('aria-expanded',String(group.expanded));
+      }
+    }
+    dataRows=visibleRows.filter(row=>!row.section && !rowNodes.get(row.row).hidden).map(row=>row.row);
+    ordered=dataRows.flatMap(row=>columns.map(col=>col+row));
+  }
+  updateOptionalRows();
   const status=make('div',root,'wb-status');
   status.setAttribute('aria-live','polite'); status.setAttribute('aria-atomic','true');
   const help=make('details',root,'wb-help');
   help.hidden=readOnly;
   make('summary',help,'','Formeln und Bedienung');
-  make('p',help,'','Wählen Sie eine Zelle und tippen Sie. Auf dem Touchscreen nutzen Sie die Formelleiste. Beginnen Sie eine Formel mit = und wählen Sie Zellbezüge per Klick oder Pfeiltaste. Enter übernimmt die Eingabe, Esc verwirft sie. Mit Tab wechseln Sie zur nächsten Zelle.');
+  make('p',help,'','Tippen Sie in die markierte Zelle oder in die Formelleiste. Eine Pfeiltaste übernimmt Ihre Eingabe und wechselt in Pfeilrichtung zur nächsten Zelle. In einer Formel wählen Sie nach = oder einem Rechenzeichen den Bezug mit den Pfeiltasten oder per Klick. Enter bestätigt die Eingabe, Esc verwirft sie. Mit F2 bearbeiten Sie den Text in der Zelle.');
   make('p',help,'','„Nach rechts ausfüllen“ kopiert Ihre Formel bis zur letzten Eingabespalte der Zeile. Relative Bezüge wandern mit, mit $ fixierte Bezüge bleiben stehen. Sie können auch mehrere Zellen gemeinsam aus einer Tabellenkalkulation einfügen.');
   make('p',help,'','Prozente können Sie als 5 % oder 0,05 eingeben. Rechnen Sie mit ungerundeten Zwischenwerten. Bereiche wie B2:D2 funktionieren mit SUMME, MEDIAN, MIN und MAX. Für mehrere Argumente verwenden Sie ein Semikolon.');
-  const sections=rows.filter(row=>row.section);
+  const sections=visibleRows.filter(row=>row.section);
   let jump;
   if(sections.length){
     const label=make('label',toolbar,'wb-jump-label','Bereich ');
     toolbar.insertBefore(label,fill);
     jump=make('select',label,'wb-jump');
     jump.setAttribute('aria-label','Zum Bereich im Arbeitsblatt');
-    const first=document.createElement('option');first.value=String(rows[0].row);first.textContent='Blattanfang';jump.add(first);
+    const first=document.createElement('option');first.value=String(visibleRows[0].row);first.textContent='Blattanfang';jump.add(first);
     for(const row of sections){
       const option=document.createElement('option');
       option.value=String(row.row);option.textContent=row.title || row.label || row.headers?.A || 'Zeile '+row.row; jump.add(option);
@@ -109,25 +145,37 @@ export function mountWorkbook(host, {rows, raw, onChange=()=>{}, marks={}, focus
       const target=Number(jump.value);
       rowToTop(target);
       if(editor) editor.focus({preventScroll:true});
-      else select('A'+target);
+      else select('A'+(dataRows.find(row=>row>=target)??dataRows.at(-1)));
     });
     scroll.addEventListener('scroll',syncJump,{passive:true});
   }
-  let selected=valid.has(focusAddress)?focusAddress:ordered[0], editor=null, original='', pointed=null, caretMode=false;
+  let selected=ordered.includes(focusAddress)?focusAddress:ordered[0], editor=null, original='', pointed=null, caretMode=false;
   let results={}, source={}, feedback=marks, localCopy=null, destroyed=false;
   const undo=[], redo=[];
+  for(const group of optionalGroups){
+    group.toggle?.addEventListener('click',()=>{
+      group.expanded=!group.expanded;
+      const keepRow=editor && editor.value.trim() ? Number(selected.slice(1)) : undefined;
+      updateOptionalRows(keepRow);
+      if(!ordered.includes(selected)){
+        const next=dataRows.find(row=>row>Number(selected.slice(1)))??dataRows.at(-1);
+        select(selected[0]+next);
+      }
+      if(editor)editor.focus({preventScroll:true});
+    });
+  }
 
   function syncJump() {
     if(!jump)return;
     const visibleTop=scroll.getBoundingClientRect().top+table.tHead.offsetHeight+2;
     const atBottom=scroll.scrollTop>0 && scroll.clientHeight+scroll.scrollTop>=scroll.scrollHeight-1;
     const current=atBottom ? sections.at(-1) : sections.findLast(row=>rowNodes.get(row.row).getBoundingClientRect().top<=visibleTop);
-    jump.value=String(current?.row ?? rows[0].row);
+    jump.value=String(current?.row ?? visibleRows[0].row);
   }
   // Only scroll the sheet itself: readers may still be looking at the assignment above it.
   function rowToTop(rowNumber) {
     const row=rowNodes.get(rowNumber);
-    if(!row)return;
+    if(!row || row.hidden)return;
     const headerHeight=table.tHead.offsetHeight;
     scroll.scrollTop += row.getBoundingClientRect().top-scroll.getBoundingClientRect().top-headerHeight;
     syncJump();
@@ -202,12 +250,13 @@ export function mountWorkbook(host, {rows, raw, onChange=()=>{}, marks={}, focus
     const changes=[];
     for(const [addr,nextValue] of entries){
       if(!writable.has(addr))continue;
-      const before=String(raw[addr]??''), after=String(nextValue??'').slice(0,800);
+      const before=String(raw[addr]??''), after=String(nextValue??'').slice(0,maxFormulaLength);
       if(before!==after)changes.push({addr,before,after});
     }
     if(!changes.length)return false;
     if(remember){undo.push(changes);if(undo.length>50)undo.shift();redo.length=0;}
     for(const {addr,after} of changes){ if(after==='')delete raw[addr];else raw[addr]=after; }
+    if(optionalGroups.length)updateOptionalRows(Number(selected.slice(1)));
     feedback={};draw();
     onChange({addresses:changes.map(change=>change.addr)});
     return true;
@@ -220,7 +269,7 @@ export function mountWorkbook(host, {rows, raw, onChange=()=>{}, marks={}, focus
     selection();return false;
   }
   function select(addr,focus=false){
-    if(!valid.has(addr)||destroyed)return;
+    if(!ordered.includes(addr)||destroyed)return;
     finish(true);
     if(destroyed)return;
     selected=addr;selection();
@@ -235,7 +284,7 @@ export function mountWorkbook(host, {rows, raw, onChange=()=>{}, marks={}, focus
     if(kind==='bar')editor=bar;
     else {
       editor=make('input',buttons.get(selected).parentElement,'wb-inline');
-      editor.maxLength=800;editor.autocomplete='off';editor.spellcheck=false;
+      editor.maxLength=maxFormulaLength;editor.autocomplete='off';editor.spellcheck=false;
       editor.setAttribute('autocapitalize','off');editor.setAttribute('aria-label','Eingabe in '+selected);
     }
     editor.value=seed??original;bar.value=editor.value;
@@ -246,7 +295,8 @@ export function mountWorkbook(host, {rows, raw, onChange=()=>{}, marks={}, focus
   }
   function adjacent(addr,dx,dy){
     const col=columns.indexOf(addr[0]), row=Number(addr.slice(1));
-    return columns[Math.max(0,Math.min(3,col+dx))]+Math.max(1,Math.min(lastRow,row+dy));
+    const rowIndex=dataRows.indexOf(row);
+    return columns[Math.max(0,Math.min(columns.length-1,col+dx))]+dataRows[Math.max(0,Math.min(dataRows.length-1,rowIndex+dy))];
   }
   function referenceSlot(){
     if(!editor || !editor.value.trimStart().startsWith('='))return null;
@@ -255,7 +305,7 @@ export function mountWorkbook(host, {rows, raw, onChange=()=>{}, marks={}, focus
     if(start!==end && start>value.indexOf('=')){
       const matched=/^(\$?)([A-D])(\$?)([1-9]\d*)$/i.exec(value.slice(start,end));
       const addr=matched && matched[2].toUpperCase()+matched[4];
-      return {start,end,addr:valid.has(addr)?addr:null,lockCol:matched?.[1]||'',lockRow:matched?.[3]||''};
+      return {start,end,addr:ordered.includes(addr)?addr:null,lockCol:matched?.[1]||'',lockRow:matched?.[3]||''};
     }
     if(start===end && /[=+*/^(;:×·⋅−\-]\s*$/.test(value.slice(0,start))){
       const next=/^(\$?)([A-D])(\$?)([1-9]\d*)(?![A-Z0-9_])/i.exec(value.slice(start));
@@ -285,7 +335,7 @@ export function mountWorkbook(host, {rows, raw, onChange=()=>{}, marks={}, focus
   });
   body.addEventListener('dblclick',event=>{
     const b=cellAt(event);
-    if(!editor && b && writable.has(b.dataset.addr)){select(b.dataset.addr);begin('inline');}
+    if(!editor && b && writable.has(b.dataset.addr)){select(b.dataset.addr);begin('inline',undefined,inputText(b.dataset.addr)!=='');}
   });
   bar.addEventListener('focus',()=>{if(editor!==bar)begin('bar');});
   root.addEventListener('input',event=>{
@@ -293,7 +343,7 @@ export function mountWorkbook(host, {rows, raw, onChange=()=>{}, marks={}, focus
     pointed=null;bar.value=editor.value;selection();
   });
   root.addEventListener('focusout',event=>{
-    if(event.target===editor && !event.relatedTarget?.matches('.wb-jump'))finish(true);
+    if(event.target===editor && !event.relatedTarget?.matches('.wb-jump,.wb-toggle-rows'))finish(true);
   });
   root.addEventListener('keydown',event=>{
     if(event.isComposing || destroyed)return;
@@ -312,7 +362,13 @@ export function mountWorkbook(host, {rows, raw, onChange=()=>{}, marks={}, focus
         if(caretMode){pointed=null;selection();}
       }else if(directions[event.key]&&!caretMode&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.shiftKey){
         const slot=referenceSlot();
-        if(slot){event.preventDefault();const addr=adjacent(slot.addr||selected,...directions[event.key]);point(addr,slot);reveal(addr);}
+        event.preventDefault();
+        if(slot){
+          const addr=adjacent(slot.addr||selected,...directions[event.key]);
+          point(addr,slot);reveal(addr);
+        }else{
+          select(adjacent(selected,...directions[event.key]),true);
+        }
       }
       return;
     }
@@ -346,11 +402,13 @@ export function mountWorkbook(host, {rows, raw, onChange=()=>{}, marks={}, focus
     const sourceAddr=event.clipboardData.getData('application/x-mainwerk-cell');
     const internal=sourceAddr && localCopy?.addr===sourceAddr && text===localCopy.text;
     event.preventDefault();
-    const patches=[], startCol=columns.indexOf(selected[0]), startRow=Number(selected.slice(1));
-    text.split('\n').slice(0,lastRow-startRow+1).forEach((line,dy)=>{
+    const patches=[], startCol=columns.indexOf(selected[0]), firstRow=Number(selected.slice(1));
+    // Preserve the physical offsets of pasted Excel ranges, including protected
+    // section headings. Compact rows have no focusable cells and remain untouched.
+    text.split('\n').slice(0,rows.at(-1).row-firstRow+1).forEach((line,dy)=>{
       line.split('\t').slice(0,4-startCol).forEach((val,dx)=>{
-        const addr=columns[startCol+dx]+(startRow+dy);
-        patches.push([addr,internal?translate(val,startCol-columns.indexOf(sourceAddr[0]),startRow-Number(sourceAddr.slice(1))):val.trim()]);
+        const addr=columns[startCol+dx]+(firstRow+dy);
+        patches.push([addr,internal?translate(val,startCol-columns.indexOf(sourceAddr[0]),firstRow-Number(sourceAddr.slice(1))):val.trim()]);
       });
     });
     write(patches);
@@ -364,7 +422,7 @@ export function mountWorkbook(host, {rows, raw, onChange=()=>{}, marks={}, focus
   });
   draw();
   if(rowNodes.has(startRow))rowToTop(startRow);
-  else if(focusAddress && valid.has(focusAddress))rowToTop(Number(focusAddress.slice(1)));
+  else if(focusAddress && ordered.includes(focusAddress))rowToTop(Number(focusAddress.slice(1)));
   return {
     commit:()=>finish(true),
     destroy(){destroyed=true;root.remove();},
